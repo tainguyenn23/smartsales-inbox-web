@@ -1,1 +1,73 @@
 @import "tailwindcss";
+
+@theme {
+  --font-body: var(--font-be-vietnam-pro), sans-serif;
+  --font-title: var(--font-be-vietnam-pro), sans-serif;
+
+  --color-primary: #003527;
+  --color-primary-container: #064e3b;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #80bea6;
+  --color-primary-fixed: #b0f0d6;
+  --color-primary-fixed-dim: #95d3ba;
+
+  --color-secondary: #5e604d;
+  --color-secondary-container: #e1e1c9;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #636451;
+
+  --color-surface: #fff8f5;
+  --color-surface-dim: #e0d8d5;
+  --color-surface-bright: #fff8f5;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #faf2ee;
+  --color-surface-container: #f4ece8;
+  --color-surface-container-high: #eee7e3;
+  --color-surface-container-highest: #e9e1dd;
+
+  --color-background: #fff8f5;
+  --color-on-background: #1e1b19;
+  --color-on-surface: #1e1b19;
+  --color-on-surface-variant: #404944;
+
+  --color-outline: #707974;
+  --color-outline-variant: #bfc9c3;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+}
+
+/* Hide scrollbar for horizontal scrolling but keep functionality */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  overscroll-behavior-y: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--font-body);
+}

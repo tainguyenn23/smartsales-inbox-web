@@ -37,21 +37,33 @@ export function useChatDemo(shopSlug: string) {
 
   // Reference to hold conversationId to avoid stale closures during rapid sends
   const conversationIdRef = useRef<string | null>(null);
-  conversationIdRef.current = conversationId;
 
   // 1. Tự động sinh và lưu customer_id vào localStorage để giữ phiên ổn định trên thiết bị
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let isMounted = true;
 
-    let existingCustomerId = localStorage.getItem(CUSTOMER_ID_KEY);
-    if (!existingCustomerId) {
-      existingCustomerId =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `cust_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      localStorage.setItem(CUSTOMER_ID_KEY, existingCustomerId);
+    async function initializeCustomerId() {
+      await Promise.resolve();
+      if (!isMounted) return;
+
+      let existingCustomerId = localStorage.getItem(CUSTOMER_ID_KEY);
+      if (!existingCustomerId) {
+        existingCustomerId =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `cust_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        localStorage.setItem(CUSTOMER_ID_KEY, existingCustomerId);
+      }
+
+      setCustomerId(existingCustomerId);
     }
-    setCustomerId(existingCustomerId);
+
+    void initializeCustomerId();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // 2. Nhận vào shopSlug, gọi GET /shops/{slug} để lấy shop.id
@@ -59,10 +71,14 @@ export function useChatDemo(shopSlug: string) {
     if (!shopSlug) return;
 
     let isMounted = true;
-    setIsShopLoading(true);
-    setShopError(null);
-
     async function fetchShop() {
+      // Keep effect setup free of synchronous state updates.
+      await Promise.resolve();
+      if (!isMounted) return;
+
+      setIsShopLoading(true);
+      setShopError(null);
+
       try {
         const data = await apiClient<ShopOut>(`/shops/${encodeURIComponent(shopSlug)}`);
         if (!isMounted) return;

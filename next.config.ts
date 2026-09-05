@@ -12,6 +12,7 @@ const withPWA = withPWAInit({
 
 const nextConfig: NextConfig = {
   // Mobile-first PWA configuration
+  turbopack: {},
 };
 
 export default withPWA(nextConfig);
