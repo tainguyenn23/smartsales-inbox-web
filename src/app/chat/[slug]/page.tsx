@@ -32,8 +32,18 @@ export default function ChatPage({ params }: ChatPageProps) {
   const unwrappedParams = use(params);
   const shopSlug = unwrappedParams.slug;
 
-  const { shop, isShopLoading, shopError, messages, isLoading, sendMessage, handleProductClick } =
-    useChatDemo(shopSlug);
+  const {
+    shop,
+    isShopLoading,
+    shopError,
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    retryLastMessage,
+    retryShop,
+    handleProductClick,
+  } = useChatDemo(shopSlug);
 
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -53,14 +63,15 @@ export default function ChatPage({ params }: ChatPageProps) {
   };
 
   return (
-    <div className="bg-background text-on-background antialiased flex flex-col min-h-screen">
+    <div className="bg-background text-on-background antialiased flex min-h-dvh flex-col">
       {/* TopAppBar */}
-      <header className="flex justify-between items-center w-full px-4 h-16 sticky top-0 z-50 bg-surface dark:bg-surface-container-low border-b border-outline-variant dark:border-outline">
+      <header className="sticky top-0 z-50 flex min-h-16 w-full items-center justify-between border-b border-outline-variant bg-surface px-4 pt-[env(safe-area-inset-top)] dark:border-outline dark:bg-surface-container-low">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => window.history.back()}
-            className="material-symbols-outlined text-primary dark:text-primary-fixed-dim hover:opacity-80 transition-opacity"
+            className="material-symbols-outlined flex size-11 items-center justify-center text-primary transition-opacity hover:opacity-80 dark:text-primary-fixed-dim"
+            aria-label="Quay lại"
           >
             arrow_back
           </button>
@@ -80,11 +91,39 @@ export default function ChatPage({ params }: ChatPageProps) {
       </header>
 
       {/* Main Chat Canvas */}
-      <main className="flex-1 p-4 flex flex-col gap-4 bg-background overflow-y-auto pb-24">
+      <main className="flex flex-1 flex-col gap-4 overflow-y-auto bg-background p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
         {shopError && (
-          <div className="p-4 bg-error-container text-on-error-container rounded-lg text-sm border border-error">
+          <div
+            role="alert"
+            className="rounded-lg border border-error bg-error-container p-4 text-sm text-on-error-container"
+          >
             <p className="font-bold">Lỗi cửa hàng:</p>
             <p>{shopError}</p>
+            <button
+              type="button"
+              onClick={() => void retryShop()}
+              disabled={isShopLoading}
+              className="mt-3 min-h-11 rounded-lg border border-error px-4 font-bold disabled:opacity-50"
+            >
+              {isShopLoading ? "Đang thử lại..." : "Thử tải lại"}
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="ml-10 rounded-lg border border-error bg-error-container p-3 text-sm text-on-error-container"
+          >
+            <p>{error}</p>
+            <button
+              type="button"
+              onClick={retryLastMessage}
+              disabled={isLoading}
+              className="mt-2 min-h-11 rounded-lg border border-error px-4 font-bold disabled:opacity-50"
+            >
+              {isLoading ? "Đang gửi lại..." : "Gửi lại tin nhắn"}
+            </button>
           </div>
         )}
 
@@ -154,6 +193,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                                 src={product.image_url}
                                 alt={product.name}
                                 fill
+                                unoptimized
                                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                                 className="object-cover"
                               />
@@ -163,7 +203,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                               <span className="material-symbols-outlined text-4xl">image</span>
                             </div>
                           )}
-                          <div className="absolute top-2 left-2 bg-[#dcfce7] text-[#166534] px-2 py-1 rounded-full border border-[#bbf7d0] flex items-center gap-1">
+                          <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full border border-[#bbf7d0] bg-[#dcfce7] px-2 py-1 text-[#166534]">
                             <span className="material-symbols-outlined text-[14px]">
                               {product.availability === "in_stock" ? "check_circle" : "inventory_2"}
                             </span>
@@ -172,7 +212,9 @@ export default function ChatPage({ params }: ChatPageProps) {
                                 ? "Sẵn Hàng"
                                 : product.availability === "preorder"
                                   ? "Đặt Trước"
-                                  : "Hết Hàng"}
+                                  : product.availability === "out_of_stock"
+                                    ? "Hết Hàng"
+                                    : "Chưa rõ tồn kho"}
                             </span>
                           </div>
                         </div>
@@ -193,14 +235,23 @@ export default function ChatPage({ params }: ChatPageProps) {
                           {/* Preview các thuộc tính biến thể nếu có */}
                           {product.variants_preview && product.variants_preview.length > 0 && (
                             <div className="flex items-center gap-1 flex-wrap">
-                              {product.variants_preview.slice(0, 3).map((v, vIdx) => (
-                                <span
+                              {product.variants_preview.slice(0, 3).map((variant, vIdx) => (
+                                <div
                                   key={vIdx}
-                                  className="text-[10px] bg-surface-container border border-outline-variant px-1.5 py-0.5 rounded text-on-surface-variant"
+                                  className="w-full rounded border border-outline-variant bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant"
                                 >
-                                  {Object.values(v.attributes || {}).join(" - ") ||
-                                    `Loại ${vIdx + 1}`}
-                                </span>
+                                  <span className="font-semibold">
+                                    {Object.entries(variant.attributes || {})
+                                      .map(([key, value]) => `${key}: ${value}`)
+                                      .join(" · ") || `Loại ${vIdx + 1}`}
+                                  </span>
+                                  {variant.price && (
+                                    <span>
+                                      {" "}
+                                      · {formatCurrency(variant.price, product.currency)}
+                                    </span>
+                                  )}
+                                </div>
                               ))}
                               {product.variants_preview.length > 3 && (
                                 <span className="text-[10px] text-on-surface-variant">
@@ -223,14 +274,16 @@ export default function ChatPage({ params }: ChatPageProps) {
                             <button
                               type="button"
                               onClick={() => handleProductClick(product)}
-                              className="flex-1 bg-surface border border-primary text-primary font-bold text-xs py-2 rounded-lg hover:bg-surface-container-low transition-colors text-center"
+                              disabled={!product.url}
+                              className="min-h-11 flex-1 rounded-lg border border-primary bg-surface px-2 text-center text-xs font-bold text-primary transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               Xem Chi Tiết
                             </button>
                             <button
                               type="button"
                               onClick={() => handleProductClick(product)}
-                              className="flex-1 bg-primary-container text-on-primary font-bold text-xs py-2 rounded-lg hover:bg-[#053e2f] transition-colors text-center"
+                              disabled={!product.url}
+                              className="min-h-11 flex-1 rounded-lg bg-primary-container px-2 text-center text-xs font-bold text-on-primary transition-colors hover:bg-[#053e2f] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               Mua Ngay
                             </button>
@@ -267,7 +320,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       {/* BottomNavBar / Composer */}
       <form
         onSubmit={handleSubmit}
-        className="fixed bottom-0 w-full z-50 flex items-center justify-center p-3 bg-surface dark:bg-surface-container-low border-t border-outline-variant dark:border-outline shadow-sm"
+        className="fixed bottom-0 z-50 flex w-full items-center justify-center border-t border-outline-variant bg-surface px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-sm dark:border-outline dark:bg-surface-container-low"
       >
         <div className="flex items-center gap-2 w-full max-w-3xl">
           <div className="relative flex-1">
@@ -275,17 +328,20 @@ export default function ChatPage({ params }: ChatPageProps) {
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              disabled={isLoading || isShopLoading}
+              disabled={isLoading || isShopLoading || !shop}
+              enterKeyHint="send"
+              autoComplete="off"
+              aria-label="Tin nhắn"
               placeholder={
                 isShopLoading ? "Đang kết nối shop..." : "Nhập tin nhắn tìm kiếm sản phẩm..."
               }
-              className="w-full bg-surface border border-outline-variant rounded-full py-2 pl-4 pr-10 text-sm text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-shadow disabled:opacity-50"
+              className="min-h-11 w-full rounded-full border border-outline-variant bg-surface py-2 pl-4 pr-10 text-base text-on-surface transition-shadow focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
           </div>
           <button
             type="submit"
-            disabled={!inputMessage.trim() || isLoading || isShopLoading}
-            className="p-2 bg-primary-container text-on-primary rounded-full flex shrink-0 hover:scale-95 transition-transform flex-col items-center justify-center h-10 w-10 disabled:opacity-40 disabled:hover:scale-100"
+            disabled={!inputMessage.trim() || isLoading || isShopLoading || !shop}
+            className="flex size-11 shrink-0 flex-col items-center justify-center rounded-full bg-primary-container p-2 text-on-primary transition-transform hover:scale-95 disabled:opacity-40 disabled:hover:scale-100"
           >
             <span
               className="material-symbols-outlined text-on-primary font-bold text-[20px]"

@@ -66,8 +66,16 @@
 
 html,
 body {
+  min-width: 320px;
+  min-height: 100%;
   overscroll-behavior-y: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   font-family: var(--font-body);
+}
+
+button,
+input,
+a {
+  touch-action: manipulation;
 }

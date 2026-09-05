@@ -1,10 +1,18 @@
-import type { ApiResponse } from "@/types/api";
+import type {
+  ApiResponse,
+  ChatRequest,
+  ChatResponse,
+  ClickEventOut,
+  ClickRequest,
+  ShopOut,
+} from "@/types/api";
 
 const DEFAULT_BASE_URL = "http://localhost:8000/api/v1";
 
-export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE_URL
-).replace(/\/+$/, "");
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE_URL).replace(
+  /\/+$/,
+  ""
+);
 
 /**
  * Custom error class containing HTTP status, backend error code, and X-Request-ID
@@ -31,10 +39,7 @@ export interface ApiClientOptions extends RequestInit {
  * Typed HTTP client wrapper for SmartSales FastAPI backend
  * Decodes standard envelope ApiResponse<T> -> returns T
  */
-export async function apiClient<T>(
-  endpoint: string,
-  options: ApiClientOptions = {}
-): Promise<T> {
+export async function apiClient<T>(endpoint: string, options: ApiClientOptions = {}): Promise<T> {
   const { params, headers, ...customConfig } = options;
 
   const normalizedPath = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -62,6 +67,7 @@ export async function apiClient<T>(
   try {
     response = await fetch(url, {
       ...customConfig,
+      cache: customConfig.cache ?? "no-store",
       headers: {
         ...defaultHeaders,
         ...headers,
@@ -76,8 +82,7 @@ export async function apiClient<T>(
     );
   }
 
-  const requestId =
-    response.headers.get("x-request-id") || response.headers.get("X-Request-ID");
+  const requestId = response.headers.get("x-request-id") || response.headers.get("X-Request-ID");
 
   let payload: ApiResponse<T> | null = null;
   try {
@@ -98,20 +103,15 @@ export async function apiClient<T>(
   // Handle envelope errors or non-2xx status
   if (!response.ok || payload.error) {
     const errorCode = payload.error?.code || `HTTP_${response.status}`;
-    const errorMessage =
-      payload.error?.message ||
-      `Request failed with status ${response.status}`;
+    const errorMessage = payload.error?.message || `Request failed with status ${response.status}`;
 
-    console.error(
-      `[API Error] [${response.status}] [${errorCode}] X-Request-ID: ${requestId}`,
-      {
-        url,
-        status: response.status,
-        code: errorCode,
-        message: errorMessage,
-        requestId,
-      }
-    );
+    console.error(`[API Error] [${response.status}] [${errorCode}] X-Request-ID: ${requestId}`, {
+      url,
+      status: response.status,
+      code: errorCode,
+      message: errorMessage,
+      requestId,
+    });
 
     throw new ApiError(errorMessage, response.status, errorCode, requestId);
   }
@@ -121,4 +121,24 @@ export async function apiClient<T>(
   }
 
   return payload.data;
+}
+
+export function fetchShop(slug: string, signal?: AbortSignal): Promise<ShopOut> {
+  return apiClient<ShopOut>(`/shops/${encodeURIComponent(slug)}`, { signal });
+}
+
+export function sendChatMessage(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
+  return apiClient<ChatResponse>("/chat", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export function trackClick(request: ClickRequest): Promise<ClickEventOut> {
+  return apiClient<ClickEventOut>("/click", {
+    method: "POST",
+    body: JSON.stringify(request),
+    keepalive: true,
+  });
 }
