@@ -1,8 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ApiError, fetchShop, sendChatMessage, trackClick } from "@/lib/api";
-import type { ShopOut, ChatRequest, ProductCard, ClickRequest } from "@/types/api";
+import { ApiError, fetchShop, streamChat, trackClick } from "@/lib/api";
+import type {
+  ShopOut,
+  ChatRequest,
+  StreamProductItem,
+  ClickRequest,
+} from "@/types/api";
 
 const CUSTOMER_ID_KEY = "smartsales_customer_id";
 const CONVERSATION_ID_PREFIX = "smartsales_conv_";
@@ -11,11 +16,15 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  products?: ProductCard[];
+  /** Danh sách sản phẩm từ SSE `products` event — contract stream, không phải ProductCard JSON */
+  products?: StreamProductItem[];
   createdAt: Date;
-  intent?: string;
-  confidence?: number;
-  needsHuman?: boolean;
+  /** true khi đang nhận tokens (chỉ có ý nghĩa với message role=assistant) */
+  isStreaming?: boolean;
+  /** true nếu backend xác nhận đã lưu (done.saved=true) */
+  saved?: boolean;
+  /** Trạng thái cuối từ done.status */
+  status?: string;
 }
 
 export function useChatDemo(shopSlug: string) {
@@ -26,14 +35,22 @@ export function useChatDemo(shopSlug: string) {
   const [customerId, setCustomerId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** true khi đang chờ event `meta` đầu tiên từ backend */
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  /** true sau khi nhận `meta`, đang nhận tokens */
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
 
-  // Reference to hold conversationId to avoid stale closures during rapid sends
+  // Refs để tránh stale closure trong callbacks SSE
   const conversationIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  /** ID của assistant message đang được build trong stream */
+  const streamingMsgIdRef = useRef<string | null>(null);
 
-  // 1. Tự động sinh và lưu customer_id vào localStorage để giữ phiên ổn định trên thiết bị
+  // -------------------------------------------------------------------------
+  // 1. Tự động sinh và lưu customer_id vào localStorage
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
     let isMounted = true;
@@ -61,10 +78,11 @@ export function useChatDemo(shopSlug: string) {
     };
   }, []);
 
-  // 2. Nhận shopSlug, gọi GET /shops/{slug}; hàm này cũng phục vụ nút retry.
+  // -------------------------------------------------------------------------
+  // 2. Resolve shop từ slug — cũng phục vụ nút retry
+  // -------------------------------------------------------------------------
   const loadShop = useCallback(async () => {
     if (!shopSlug) return;
-    // Defer state changes so invoking from an effect does not cascade synchronously.
     await Promise.resolve();
     setIsShopLoading(true);
     setShopError(null);
@@ -91,7 +109,16 @@ export function useChatDemo(shopSlug: string) {
     queueMicrotask(() => void loadShop());
   }, [loadShop]);
 
-  // 3. Hàm sendMessage (API này không streaming, trả về full response)
+  // Huỷ stream khi unmount component
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // 3. sendMessage — gọi POST /api/v1/chat/stream (SSE)
+  // -------------------------------------------------------------------------
   const sendMessage = useCallback(
     async (messageText: string, retry = false) => {
       const trimmedMessage = messageText.trim();
@@ -102,9 +129,15 @@ export function useChatDemo(shopSlug: string) {
         return;
       }
 
+      // Huỷ stream cũ nếu đang chạy (user gửi tin nhắn mới)
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       setError(null);
       setFailedMessage(null);
       setIsLoading(true);
+      setIsStreaming(false);
 
       const userMsgId =
         typeof crypto !== "undefined" && crypto.randomUUID
@@ -118,97 +151,169 @@ export function useChatDemo(shopSlug: string) {
         createdAt: new Date(),
       };
 
-      // Optimistic UI update: thêm tin nhắn của user ngay lập tức
+      // Optimistic UI: thêm tin nhắn của user ngay lập tức
       if (!retry) setMessages((prev) => [...prev, userMessage]);
 
+      const payload: ChatRequest = {
+        shop_id: shop.id,
+        conversation_id: conversationIdRef.current || null,
+        customer_id: customerId || "guest-user",
+        channel: "web",
+        message: trimmedMessage,
+      };
+
       try {
-        const currentConvId = conversationIdRef.current;
+        await streamChat(
+          payload,
+          {
+            // --- meta: backend confirm conversation, tạo placeholder message ---
+            onMeta: (meta) => {
+              // Lưu conversation_id cho lượt kế tiếp
+              setConversationId(meta.conversation_id);
+              conversationIdRef.current = meta.conversation_id;
+              if (typeof window !== "undefined") {
+                localStorage.setItem(
+                  `${CONVERSATION_ID_PREFIX}${shop.id}`,
+                  meta.conversation_id
+                );
+              }
 
-        const payload: ChatRequest = {
-          shop_id: shop.id,
-          conversation_id: currentConvId || null,
-          customer_id: customerId || "guest-user",
-          channel: "web",
-          message: trimmedMessage,
-        };
+              // Tạo assistant message placeholder bằng message_id từ backend
+              streamingMsgIdRef.current = meta.message_id;
+              const placeholderMsg: ChatMessage = {
+                id: meta.message_id,
+                role: "assistant",
+                content: "",
+                products: [],
+                createdAt: new Date(),
+                isStreaming: true,
+                saved: false,
+              };
+              setMessages((prev) => [...prev, placeholderMsg]);
+              setIsLoading(false);
+              setIsStreaming(true);
+            },
 
-        // Gửi POST /chat (Non-streaming: nhận về ChatResponseData hoàn chỉnh)
-        const responseData = await sendChatMessage(payload);
+            // --- products: thay thế danh sách card của lượt này ---
+            onProducts: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (!msgId) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId ? { ...m, products: event.products } : m
+                )
+              );
+            },
 
-        // Cập nhật lại conversation_id cho các lượt chat kế tiếp
-        if (responseData.conversation_id) {
-          setConversationId(responseData.conversation_id);
-          conversationIdRef.current = responseData.conversation_id;
+            // --- token: nối text vào content của assistant message ---
+            onToken: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (!msgId) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId ? { ...m, content: m.content + event.text } : m
+                )
+              );
+            },
 
-          if (typeof window !== "undefined") {
-            localStorage.setItem(
-              `${CONVERSATION_ID_PREFIX}${shop.id}`,
-              responseData.conversation_id
-            );
-          }
+            // --- error SSE event: hiển thị warning, tiếp tục đọc đến done ---
+            onError: (event) => {
+              console.warn("[SSE Error Event]", event.code, event.message);
+              // Không setError ở đây để không ngắt UX; backend vẫn phát done
+            },
+
+            // --- done: kết thúc stream, cập nhật trạng thái lưu ---
+            onDone: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (msgId) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === msgId
+                      ? {
+                          ...m,
+                          isStreaming: false,
+                          saved: event.saved,
+                          status: event.status,
+                        }
+                      : m
+                  )
+                );
+              }
+              streamingMsgIdRef.current = null;
+              setIsStreaming(false);
+              setIsLoading(false);
+            },
+          },
+          controller.signal
+        );
+      } catch (err) {
+        // AbortError = user huỷ chủ động (component unmount, gửi tin mới) — không báo lỗi
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setIsLoading(false);
+          setIsStreaming(false);
+          return;
         }
 
-        const assistantMsgId =
-          typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `msg_ai_${Date.now()}`;
-
-        const assistantMessage: ChatMessage = {
-          id: assistantMsgId,
-          role: "assistant",
-          content: responseData.reply,
-          products: responseData.products || [],
-          createdAt: new Date(),
-          intent: responseData.intent,
-          confidence: responseData.confidence,
-          needsHuman: responseData.needs_human,
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-      } catch (err) {
         const errorMessage =
           err instanceof ApiError
-            ? err.message
+            ? err.status === 429 && err.retryAfter
+              ? `Bạn gửi yêu cầu quá nhanh. Vui lòng thử lại sau ${err.retryAfter} giây.`
+              : err.message
             : "Không thể kết nối đến trợ lý ảo. Vui lòng thử lại.";
 
         setError(errorMessage);
         setFailedMessage(trimmedMessage);
-      } finally {
+
+        // Nếu lỗi xảy ra sau khi đã nhận meta (đang stream) — đánh dấu message thất bại
+        const currentMsgId = streamingMsgIdRef.current;
+        if (currentMsgId) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === currentMsgId
+                ? { ...m, isStreaming: false, status: "error" }
+                : m
+            )
+          );
+          streamingMsgIdRef.current = null;
+        }
+
         setIsLoading(false);
+        setIsStreaming(false);
       }
     },
     [shop, customerId]
   );
 
   const retryLastMessage = useCallback(() => {
-    if (failedMessage && !isLoading) void sendMessage(failedMessage, true);
-  }, [failedMessage, isLoading, sendMessage]);
+    if (failedMessage && !isLoading && !isStreaming) void sendMessage(failedMessage, true);
+  }, [failedMessage, isLoading, isStreaming, sendMessage]);
 
-  // 4. Hàm handleProductClick: gọi POST /click trước khi mở URL, lỗi tracking không làm gián đoạn chuyển trang
+  // -------------------------------------------------------------------------
+  // 4. handleProductClick — gọi POST /click trước khi mở URL
+  // -------------------------------------------------------------------------
   const handleProductClick = useCallback(
-    async (product: ProductCard) => {
-      const targetUrl = product.url;
+    async (product: StreamProductItem) => {
+      // Ưu tiên affiliate_url theo spec, fallback product_url
+      const targetUrl = product.affiliate_url ?? product.product_url;
       if (!targetUrl) {
         console.warn("[Click Warning] Sản phẩm không có URL hợp lệ:", product);
         return;
       }
 
-      // Gửi tracking bất đồng bộ, catch mọi lỗi để không gián đoạn người dùng
       if (shop?.id) {
         const clickPayload: ClickRequest = {
           shop_id: shop.id,
           conversation_id: conversationIdRef.current || null,
-          product_id: product.id,
+          product_id: product.product_id,
           url: targetUrl,
         };
 
         void trackClick(clickPayload).catch((err) => {
-          // Lỗi tracking được ghi nhận nội bộ, tuyệt đối không chặn việc mở trang
+          // Lỗi tracking không chặn việc mở trang
           console.warn("[Click Tracking Non-blocking Error]", err);
         });
       }
 
-      // Mở URL sản phẩm ra tab mới an toàn
       if (typeof window !== "undefined") {
         window.open(targetUrl, "_blank", "noopener,noreferrer");
       }
@@ -217,9 +322,13 @@ export function useChatDemo(shopSlug: string) {
   );
 
   const resetConversation = useCallback(() => {
+    abortControllerRef.current?.abort();
     setMessages([]);
     setConversationId(null);
     conversationIdRef.current = null;
+    streamingMsgIdRef.current = null;
+    setIsLoading(false);
+    setIsStreaming(false);
     if (shop?.id && typeof window !== "undefined") {
       localStorage.removeItem(`${CONVERSATION_ID_PREFIX}${shop.id}`);
     }
@@ -232,7 +341,10 @@ export function useChatDemo(shopSlug: string) {
     customerId,
     conversationId,
     messages,
+    /** true khi đang chờ event meta (giai đoạn trước khi stream bắt đầu) */
     isLoading,
+    /** true khi đang nhận tokens từ stream */
+    isStreaming,
     error,
     failedMessage,
     sendMessage,

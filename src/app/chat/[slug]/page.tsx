@@ -2,7 +2,7 @@
 
 import { use, useState, useRef, useEffect, type FormEvent } from "react";
 import { useChatDemo } from "@/features/chat/hooks/useChatDemo";
-import type { ProductCard } from "@/types/api";
+import type { StreamProductItem } from "@/types/api";
 import Image from "next/image";
 
 interface ChatPageProps {
@@ -10,12 +10,13 @@ interface ChatPageProps {
 }
 
 /**
- * Helper định dạng tiền tệ an toàn từ chuỗi Decimal
+ * Định dạng tiền tệ an toàn từ chuỗi hoặc số Decimal.
+ * Backend có thể trả price dạng number hoặc string trong giai đoạn chuyển tiếp.
  */
-function formatCurrency(priceStr: string | null | undefined, currency = "VND"): string {
-  if (!priceStr) return "";
-  const numericPrice = parseFloat(priceStr);
-  if (isNaN(numericPrice)) return priceStr;
+function formatCurrency(price: number | string | null | undefined, currency = "VND"): string {
+  if (price === null || price === undefined || price === "") return "";
+  const numericPrice = typeof price === "number" ? price : parseFloat(String(price));
+  if (isNaN(numericPrice)) return String(price);
 
   try {
     return new Intl.NumberFormat("vi-VN", {
@@ -38,6 +39,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     shopError,
     messages,
     isLoading,
+    isStreaming,
     error,
     sendMessage,
     retryLastMessage,
@@ -48,15 +50,15 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Tự động cuộn xuống dưới cùng khi có tin nhắn mới hoặc đang chờ câu trả lời
+  // Tự động cuộn xuống dưới cùng khi có tin nhắn mới hoặc đang stream
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isStreaming]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = inputMessage.trim();
-    if (!trimmed || isLoading || isShopLoading) return;
+    if (!trimmed || isLoading || isStreaming || isShopLoading) return;
 
     sendMessage(trimmed);
     setInputMessage("");
@@ -119,10 +121,10 @@ export default function ChatPage({ params }: ChatPageProps) {
             <button
               type="button"
               onClick={retryLastMessage}
-              disabled={isLoading}
+              disabled={isLoading || isStreaming}
               className="mt-2 min-h-11 rounded-lg border border-error px-4 font-bold disabled:opacity-50"
             >
-              {isLoading ? "Đang gửi lại..." : "Gửi lại tin nhắn"}
+              {isLoading || isStreaming ? "Đang gửi lại..." : "Gửi lại tin nhắn"}
             </button>
           </div>
         )}
@@ -142,7 +144,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           </div>
         )}
 
-        {/* Danh sách tin nhắn động từ hook */}
+        {/* Danh sách tin nhắn */}
         {messages.map((msg) => (
           <div key={msg.id} className="w-full flex flex-col gap-2">
             {msg.role === "user" ? (
@@ -167,8 +169,14 @@ export default function ChatPage({ params }: ChatPageProps) {
                       support_agent
                     </span>
                   </div>
-                  <div className="bg-surface text-on-surface p-3 rounded-lg rounded-bl-none border border-outline-variant shadow-[0px_2px_4px_rgba(28,25,23,0.04),_0px_1px_2px_rgba(28,25,23,0.02)]">
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  <div className="bg-surface text-on-surface p-3 rounded-lg rounded-bl-none border border-outline-variant shadow-[0px_2px_4px_rgba(28,25,23,0.04),0px_1px_2px_rgba(28,25,23,0.02)]">
+                    <p className="text-sm whitespace-pre-wrap">
+                      {msg.content}
+                      {/* Cursor nhấp nháy khi đang stream text */}
+                      {msg.isStreaming && (
+                        <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
+                      )}
+                    </p>
                   </div>
                 </div>
                 <span className="text-on-surface-variant text-[10px] pl-10">
@@ -178,119 +186,110 @@ export default function ChatPage({ params }: ChatPageProps) {
                   })}
                 </span>
 
-                {/* Product Carousel (nếu AI trả lời kèm danh sách sản phẩm) */}
+                {/* Product Carousel — dùng StreamProductItem từ SSE */}
                 {msg.products && msg.products.length > 0 && (
                   <div className="w-full pl-10 -mr-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory flex gap-4 pb-4 pt-2">
-                    {msg.products.map((product: ProductCard) => (
-                      <article
-                        key={product.id}
-                        className="snap-center shrink-0 w-[85%] max-w-[280px] bg-surface border border-outline-variant rounded-lg overflow-hidden flex flex-col shadow-[0px_2px_4px_rgba(28,25,23,0.04),_0px_1px_2px_rgba(28,25,23,0.02)]"
-                      >
-                        <div className="relative w-full aspect-[4/3] bg-surface-container-high">
-                          {product.image_url ? (
-                            <div className="relative w-full h-full">
-                              <Image
-                                src={product.image_url}
-                                alt={product.name}
-                                fill
-                                unoptimized
-                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                className="object-cover"
-                              />
-                            </div>
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-outline">
-                              <span className="material-symbols-outlined text-4xl">image</span>
-                            </div>
-                          )}
-                          <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full border border-[#bbf7d0] bg-[#dcfce7] px-2 py-1 text-[#166534]">
-                            <span className="material-symbols-outlined text-[14px]">
-                              {product.availability === "in_stock" ? "check_circle" : "inventory_2"}
-                            </span>
-                            <span className="text-[10px] font-bold uppercase">
-                              {product.availability === "in_stock"
-                                ? "Sẵn Hàng"
-                                : product.availability === "preorder"
-                                  ? "Đặt Trước"
-                                  : product.availability === "out_of_stock"
-                                    ? "Hết Hàng"
-                                    : "Chưa rõ tồn kho"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 flex flex-col gap-2 flex-1">
-                          <h3 className="text-sm font-bold text-on-surface line-clamp-1">
-                            {product.name}
-                          </h3>
-                          <p className="text-sm text-primary font-bold">
-                            {formatCurrency(product.min_price, product.currency)}
-                            {product.max_price && product.max_price !== product.min_price && (
-                              <span className="text-xs text-on-surface-variant font-normal ml-1">
-                                - {formatCurrency(product.max_price, product.currency)}
-                              </span>
+                    {msg.products.map((product: StreamProductItem) => {
+                      // Ưu tiên affiliate_url → product_url theo spec
+                      const productUrl = product.affiliate_url ?? product.product_url;
+                      return (
+                        <article
+                          key={product.product_id}
+                          className="snap-center shrink-0 w-[85%] max-w-70 bg-surface border border-outline-variant rounded-lg overflow-hidden flex flex-col shadow-[0px_2px_4px_rgba(28,25,23,0.04),0px_1px_2px_rgba(28,25,23,0.02)]"
+                        >
+                          <div className="relative w-full aspect-4/3 bg-surface-container-high">
+                            {product.image_url ? (
+                              <div className="relative w-full h-full">
+                                <Image
+                                  src={product.image_url}
+                                  alt={product.name}
+                                  fill
+                                  unoptimized
+                                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                  className="object-cover"
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-outline">
+                                <span className="material-symbols-outlined text-4xl">image</span>
+                              </div>
                             )}
-                          </p>
-
-                          {/* Preview các thuộc tính biến thể nếu có */}
-                          {product.variants_preview && product.variants_preview.length > 0 && (
-                            <div className="flex items-center gap-1 flex-wrap">
-                              {product.variants_preview.slice(0, 3).map((variant, vIdx) => (
-                                <div
-                                  key={vIdx}
-                                  className="w-full rounded border border-outline-variant bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant"
-                                >
-                                  <span className="font-semibold">
-                                    {Object.entries(variant.attributes || {})
-                                      .map(([key, value]) => `${key}: ${value}`)
-                                      .join(" · ") || `Loại ${vIdx + 1}`}
-                                  </span>
-                                  {variant.price && (
-                                    <span>
-                                      {" "}
-                                      · {formatCurrency(variant.price, product.currency)}
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                              {product.variants_preview.length > 3 && (
-                                <span className="text-[10px] text-on-surface-variant">
-                                  +{product.variants_preview.length - 3} loại
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {product.reason && (
-                            <div className="mt-1 bg-surface-container-low p-2 rounded border border-outline-variant border-dashed">
-                              <p className="text-on-surface-variant text-[11px] leading-tight">
-                                <span className="font-bold text-primary">Lý do gợi ý:</span>{" "}
-                                {product.reason}
-                              </p>
-                            </div>
-                          )}
-
-                          <div className="mt-auto pt-3 flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleProductClick(product)}
-                              disabled={!product.url}
-                              className="min-h-11 flex-1 rounded-lg border border-primary bg-surface px-2 text-center text-xs font-bold text-primary transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Xem Chi Tiết
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleProductClick(product)}
-                              disabled={!product.url}
-                              className="min-h-11 flex-1 rounded-lg bg-primary-container px-2 text-center text-xs font-bold text-on-primary transition-colors hover:bg-[#053e2f] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Mua Ngay
-                            </button>
+                            {/* Badge rank */}
+                            {product.rank === 1 && (
+                              <div className="absolute top-2 right-2 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                                #1
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      </article>
-                    ))}
+
+                          <div className="p-3 flex flex-col gap-2 flex-1">
+                            <h3 className="text-sm font-bold text-on-surface line-clamp-1">
+                              {product.name}
+                            </h3>
+
+                            {/* Giá từ variant đầu tiên in-stock */}
+                            {product.variants && product.variants.length > 0 && (
+                              <p className="text-sm text-primary font-bold">
+                                {formatCurrency(product.variants[0].price, product.currency)}
+                                {product.variants.length > 1 && (
+                                  <span className="text-xs text-on-surface-variant font-normal ml-1">
+                                    và {product.variants.length - 1} loại khác
+                                  </span>
+                                )}
+                              </p>
+                            )}
+
+                            {/* Preview các variant in-stock */}
+                            {product.variants && product.variants.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {product.variants.slice(0, 3).map((variant, vIdx) => (
+                                  <div
+                                    key={variant.id || vIdx}
+                                    className="w-full rounded border border-outline-variant bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant"
+                                  >
+                                    <span className="font-semibold">
+                                      {Object.entries(variant.attributes || {})
+                                        .map(([key, value]) => `${key}: ${value}`)
+                                        .join(" · ") || variant.name || `Loại ${vIdx + 1}`}
+                                    </span>
+                                    {variant.price && (
+                                      <span>
+                                        {" "}
+                                        · {formatCurrency(variant.price, product.currency)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                                {product.variants.length > 3 && (
+                                  <span className="text-[10px] text-on-surface-variant">
+                                    +{product.variants.length - 3} loại
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="mt-auto pt-3 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleProductClick(product)}
+                                disabled={!productUrl}
+                                className="min-h-11 flex-1 rounded-lg border border-primary bg-surface px-2 text-center text-xs font-bold text-primary transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Xem Chi Tiết
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleProductClick(product)}
+                                disabled={!productUrl}
+                                className="min-h-11 flex-1 rounded-lg bg-primary-container px-2 text-center text-xs font-bold text-on-primary transition-colors hover:bg-[#053e2f] disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Mua Ngay
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -298,7 +297,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           </div>
         ))}
 
-        {/* Loading Indicator khi trợ lý đang sinh câu trả lời */}
+        {/* Loading dots — khi đang chờ event meta từ backend */}
         {isLoading && (
           <div className="flex items-end gap-2 max-w-[85%]">
             <div className="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center shrink-0 border border-outline-variant">
@@ -328,19 +327,23 @@ export default function ChatPage({ params }: ChatPageProps) {
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              disabled={isLoading || isShopLoading || !shop}
+              disabled={isLoading || isStreaming || isShopLoading || !shop}
               enterKeyHint="send"
               autoComplete="off"
               aria-label="Tin nhắn"
               placeholder={
-                isShopLoading ? "Đang kết nối shop..." : "Nhập tin nhắn tìm kiếm sản phẩm..."
+                isShopLoading
+                  ? "Đang kết nối shop..."
+                  : isStreaming
+                    ? "Đang nhận trả lời..."
+                    : "Nhập tin nhắn tìm kiếm sản phẩm..."
               }
               className="min-h-11 w-full rounded-full border border-outline-variant bg-surface py-2 pl-4 pr-10 text-base text-on-surface transition-shadow focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
           </div>
           <button
             type="submit"
-            disabled={!inputMessage.trim() || isLoading || isShopLoading || !shop}
+            disabled={!inputMessage.trim() || isLoading || isStreaming || isShopLoading || !shop}
             className="flex size-11 shrink-0 flex-col items-center justify-center rounded-full bg-primary-container p-2 text-on-primary transition-transform hover:scale-95 disabled:opacity-40 disabled:hover:scale-100"
           >
             <span
