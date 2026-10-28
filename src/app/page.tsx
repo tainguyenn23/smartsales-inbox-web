@@ -20,11 +20,12 @@ export default function Home() {
               SmartSales Inbox Assistant
             </p>
             <h1 className="max-w-xl text-3xl font-bold leading-tight sm:text-4xl">
-              Chat thử với cửa hàng demo
+              Trợ lý bán hàng trả lời đúng giá, đúng tồn kho
             </h1>
             <p className="mt-4 max-w-xl leading-7 text-primary-fixed">
-              Kiểm tra tư vấn sản phẩm, bộ lọc giá, màu sắc, kích thước và phản hồi
-              streaming trực tiếp trên giao diện khách hàng.
+              Khách hỏi giá, màu, size, còn hàng hay “mẫu thứ hai còn đen không?” đều được trả lời
+              từ catalog của shop. AI chỉ dùng khi khách cần tư vấn, và khách có thể để lại SĐT
+              chốt đơn ngay trong chat.
             </p>
           </div>
 
@@ -51,9 +52,29 @@ export default function Home() {
               </Link>
             </div>
 
+            <div className="mt-5 flex flex-col gap-4 rounded-3xl border border-outline-variant/60 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-secondary">
+                  Dành cho chủ shop
+                </p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  Quản lý sản phẩm, import CSV/XLSX, xem hội thoại, leads và nhu cầu khách chưa
+                  được đáp ứng.
+                </p>
+              </div>
+              <Link
+                href="/dashboard"
+                className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-full border border-primary px-6 py-3 font-semibold text-primary transition hover:bg-surface-container-low"
+              >
+                Vào Dashboard
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  dashboard
+                </span>
+              </Link>
+            </div>
+
             <p className="mt-5 text-sm leading-6 text-on-surface-variant">
-              Trang chat sẽ tự lấy shop qua API bằng slug trên. Nếu báo không tìm thấy
-              shop, hãy chạy script seed demo ở backend trước.
+              Nếu trang chat báo không tìm thấy shop, hãy chạy script seed demo ở backend trước.
             </p>
           </div>
         </div>

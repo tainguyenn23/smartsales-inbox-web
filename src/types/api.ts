@@ -79,6 +79,11 @@ export interface StreamErrorEvent {
   message: string;
 }
 
+/** Additive event (Phase 4.5): the client should show a UI element, e.g. a lead form. */
+export interface StreamActionEvent {
+  type: "lead_form";
+}
+
 export interface StreamDoneEvent {
   message_id: string;
   saved: boolean;

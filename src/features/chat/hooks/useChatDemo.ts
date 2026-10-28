@@ -25,6 +25,8 @@ export interface ChatMessage {
   saved?: boolean;
   /** Trạng thái cuối từ done.status */
   status?: string;
+  /** Backend yêu cầu hiện form tên/SĐT (SSE `action` lead_form) */
+  leadForm?: boolean;
 }
 
 export function useChatDemo(shopSlug: string) {
@@ -214,6 +216,13 @@ export function useChatDemo(shopSlug: string) {
                   m.id === msgId ? { ...m, content: m.content + event.text } : m
                 )
               );
+            },
+
+            // --- action: hiện form để lại tên/SĐT dưới tin nhắn này ---
+            onAction: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (!msgId || event.type !== "lead_form") return;
+              setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, leadForm: true } : m)));
             },
 
             // --- error SSE event: hiển thị warning, tiếp tục đọc đến done ---

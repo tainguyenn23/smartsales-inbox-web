@@ -10,6 +10,7 @@ import type {
   StreamTokenEvent,
   StreamErrorEvent,
   StreamDoneEvent,
+  StreamActionEvent,
 } from "@/types/api";
 
 const DEFAULT_BASE_URL = "http://localhost:8000/api/v1";
@@ -166,6 +167,8 @@ export interface StreamChatCallbacks {
   /** SSE error event — tiếp tục đọc tới done, không throw */
   onError: (event: StreamErrorEvent) => void;
   onDone: (event: StreamDoneEvent) => void;
+  /** Optional UI hint, e.g. show the name/phone form after an order. */
+  onAction?: (event: StreamActionEvent) => void;
 }
 
 /**
@@ -298,6 +301,9 @@ export async function streamChat(
             break;
           case "token":
             callbacks.onToken(data as StreamTokenEvent);
+            break;
+          case "action":
+            callbacks.onAction?.(data as StreamActionEvent);
             break;
           case "error":
             // SSE-level error — báo cáo nhưng tiếp tục đọc tới done

@@ -1,0 +1,4 @@
+product_group_key,name,category,description,tags,status,product_url,image_url,sku,variant_name,attributes,price,stock_quantity,stock_status
+ao-thun-cotton,Áo thun cotton basic,Áo,"Áo thun 100% cotton, form rộng",áo thun;cotton,active,https://shop.example.com/ao-thun-cotton,,ATC-DEN-L,Đen / L,"{""color"": ""Đen"", ""size"": ""L""}",180000,12,in_stock
+ao-thun-cotton,Áo thun cotton basic,Áo,"Áo thun 100% cotton, form rộng",áo thun;cotton,active,https://shop.example.com/ao-thun-cotton,,ATC-TRANG-M,Trắng / M,"{""color"": ""Trắng"", ""size"": ""M""}",180000,0,out_of_stock
+den-ban-led,Đèn bàn LED chống cận,Đèn,Đèn bàn 3 chế độ sáng,đèn bàn;học tập,active,,,DB-XANH,Xanh dương,"{""color"": ""Xanh dương""}",350000,,unknown

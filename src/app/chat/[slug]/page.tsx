@@ -2,6 +2,7 @@
 
 import { use, useState, useRef, useEffect, type FormEvent } from "react";
 import { useChatDemo } from "@/features/chat/hooks/useChatDemo";
+import { LeadForm } from "@/features/chat/LeadForm";
 import type { StreamProductItem } from "@/types/api";
 import Image from "next/image";
 
@@ -291,6 +292,11 @@ export default function ChatPage({ params }: ChatPageProps) {
                       );
                     })}
                   </div>
+                )}
+
+                {/* Form để lại tên/SĐT khi khách đã chọn mẫu muốn mua */}
+                {msg.leadForm && !msg.isStreaming && (
+                  <LeadForm onSubmit={sendMessage} disabled={isLoading || isStreaming} />
                 )}
               </div>
             )}

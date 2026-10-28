@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SmartSales Web
 
-## Getting Started
+Frontend Next.js/React hiện có cho Customer Chat. Định hướng mới: Catalog-First Sales Assistant; roadmap ở [build checklist](../docs/build-checklist-final.md), kiến trúc ở [architecture](../docs/architecture.md).
 
-First, run the development server:
+## Hiện trạng từ source
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- `src/app/chat/[slug]/page.tsx`: Customer Chat theo shop slug.
+- `src/features/chat/hooks/useChatDemo.ts`: resolve shop, gửi chat SSE, lưu conversation ID phía client, click tracking và trạng thái lỗi.
+- `src/lib/api/` và `src/types/`: API client/types; JSON chat và SSE có cấu trúc product cards khác nhau, cần giữ mapping.
+- Merchant Dashboard/auth chưa có trong route tree được rà soát. Chưa xác nhận MVP hoàn thành hoặc chạy end-to-end.
+
+Giữ stack hiện tại. Tới phase UI mới bổ sung màn catalog/import, hội thoại và thống kê tối giản sau khi backend có auth/quyền shop. Không xây màn reindex hoặc hiển thị dữ liệu quản trị giả.
+
+## Chạy frontend local
+
+Từ thư mục này, cài dependencies theo lockfile rồi dùng script hiện có:
+
+```powershell
+npm.cmd ci
+npm.cmd run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+URL mặc định `http://localhost:3000`; cấu hình `NEXT_PUBLIC_API_BASE_URL` theo `.env.example` và origin CORS backend. Chỉ public config được đưa vào client; không có Gemini key, DB URL hoặc service key trong bundle.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Gửi chat tới backend cấu hình Gemini hiện tại có thể gọi API thật, kể cả bước intent. E2E/automation phải dùng fake backend/provider đã kiểm chứng và chặn outbound AI theo [testing policy](../docs/testing.md). Lượt sửa docs chưa chạy demo hoặc xác minh setup.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Contract và kiểm tra
 
-## Learn More
+[API map](../docs/backend-frontend-api-map.md) và [SSE contract](../backend/docs/chat-stream.md) là baseline hiện hữu. Khi backend refactor phải giữ tương thích JSON/SSE hoặc cập nhật client có mapping rõ. Conversation ID/localStorage không thay thế session authorization; không tái sử dụng hội thoại khác shop/customer.
 
-To learn more about Next.js, take a look at the following resources:
+Scripts hiện có: `npm.cmd run lint`, `npm.cmd run build`, `npm.cmd run format:check`. Chỉ chạy checks liên quan khi tới phase triển khai. `generate:api` đọc `openapi.json` local; chỉ regenerate khi contract thực thay đổi, không dùng kiến trúc đích như schema đã triển khai.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Trước khi viết code Next.js, đọc [AGENTS.md](AGENTS.md) và guide phù hợp của phiên bản đã cài. Lượt hiện tại chỉ sửa Markdown, không đổi code/config/dependencies.
