@@ -103,8 +103,59 @@ export function login(email: string, password: string): Promise<LoginResult> {
   });
 }
 
-export function fetchMe(token: string): Promise<{ shops: MerchantShop[] }> {
+export interface RegisterPayload {
+  email: string;
+  password: string;
+  display_name?: string | null;
+  shop_name?: string | null;
+  shop_slug?: string | null;
+}
+
+export function registerMerchant(payload: RegisterPayload): Promise<LoginResult> {
+  return apiClient<LoginResult>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loginWithGoogle(payload: {
+  id_token: string;
+  shop_name?: string | null;
+  shop_slug?: string | null;
+}): Promise<LoginResult> {
+  return apiClient<LoginResult>("/auth/google", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function changePassword(
+  token: string,
+  payload: { current_password: string; new_password: string }
+): Promise<LoginResult> {
+  return apiClient<LoginResult>("/auth/change-password", {
+    method: "POST",
+    headers: auth(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchMe(token: string): Promise<{
+  merchant: { id: string; email: string; display_name: string | null };
+  shops: MerchantShop[];
+}> {
   return apiClient("/auth/me", { headers: auth(token) });
+}
+
+export function createShop(
+  token: string,
+  payload: { name: string; slug: string; owner_email?: string | null }
+): Promise<{ id: string; name: string; slug: string }> {
+  return apiClient("/shops", {
+    method: "POST",
+    headers: auth(token),
+    body: JSON.stringify(payload),
+  });
 }
 
 const shopPath = (shopId: string, path: string) => `/merchant/shops/${encodeURIComponent(shopId)}${path}`;
@@ -123,8 +174,11 @@ export function fetchMessages(token: string, shopId: string, conversationId: str
   });
 }
 
-export function fetchLeads(token: string, shopId: string): Promise<Page<Lead>> {
-  return apiClient(shopPath(shopId, "/leads"), { headers: auth(token) });
+export function fetchLeads(token: string, shopId: string, status?: LeadStatus | ""): Promise<Page<Lead>> {
+  return apiClient(shopPath(shopId, "/leads"), {
+    headers: auth(token),
+    params: { status: status || undefined },
+  });
 }
 
 export function updateLeadStatus(token: string, shopId: string, leadId: string, status: LeadStatus): Promise<Lead> {
@@ -143,11 +197,60 @@ export function fetchProducts(
   token: string,
   shopId: string,
   page: number,
-  search?: string
+  search?: string,
+  options?: { inStock?: boolean; activeOnly?: boolean }
 ): Promise<Page<ProductListItem> & { page: number; limit: number }> {
   return apiClient("/products", {
     headers: auth(token),
-    params: { shop_id: shopId, page, limit: 20, search: search || undefined },
+    params: {
+      shop_id: shopId,
+      page,
+      limit: 20,
+      search: search || undefined,
+      in_stock: options?.inStock || undefined,
+      active_only: options?.activeOnly || undefined,
+    },
+  });
+}
+
+export interface ProductCreatePayload {
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  product_url?: string | null;
+  variants: {
+    name?: string | null;
+    sku?: string | null;
+    attributes?: Record<string, string>;
+    price?: number | null;
+    stock_quantity?: number | null;
+    stock_status: "in_stock" | "out_of_stock" | "preorder" | "unknown";
+  }[];
+}
+
+export function createProduct(
+  token: string,
+  shopId: string,
+  payload: ProductCreatePayload
+): Promise<ProductDetail> {
+  return apiClient("/products", {
+    method: "POST",
+    headers: auth(token),
+    params: { shop_id: shopId },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProduct(
+  token: string,
+  shopId: string,
+  productId: string
+): Promise<{ id: string; deleted: boolean }> {
+  return apiClient(`/products/${encodeURIComponent(productId)}`, {
+    method: "DELETE",
+    headers: auth(token),
+    params: { shop_id: shopId },
   });
 }
 
