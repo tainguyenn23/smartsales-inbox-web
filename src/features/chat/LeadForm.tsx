@@ -12,6 +12,7 @@ const PHONE = /^(?:\+?84|0)\d{8,10}$/;
 export function LeadForm({ onSubmit, disabled }: { onSubmit: (text: string) => void; disabled?: boolean }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
@@ -24,7 +25,7 @@ export function LeadForm({ onSubmit, disabled }: { onSubmit: (text: string) => v
     }
     setError(null);
     setSent(true);
-    onSubmit(`${name.trim() ? `Tên mình là ${name.trim()}, ` : ""}SĐT ${digits}`);
+    onSubmit(`${name.trim() ? `Tên mình là ${name.trim()}, ` : ""}SĐT ${digits}${note.trim() ? `, Ghi chú: ${note.trim()}` : ""}`);
   }
 
   if (sent) return <p className="pl-10 text-xs text-on-surface-variant">Đã gửi thông tin cho shop.</p>;
@@ -51,6 +52,14 @@ export function LeadForm({ onSubmit, disabled }: { onSubmit: (text: string) => v
         inputMode="tel"
         autoComplete="tel"
         required
+      />
+      <textarea
+        className="rounded-lg border border-outline-variant px-3 py-2 text-sm"
+        placeholder="Ghi chú cho shop (không bắt buộc)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        maxLength={500}
+        rows={2}
       />
       {error && <p className="text-xs text-red-700">{error}</p>}
       <button

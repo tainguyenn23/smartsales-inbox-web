@@ -12,7 +12,7 @@ export interface ApiResponse<T> {
   error: ApiErrorDetail | null;
 }
 
-export type ShopOut = components["schemas"]["ShopOut"];
+export type ShopOut = components["schemas"]["ShopOut"] & { categories?: string[] };
 export type ChatRequest = components["schemas"]["ChatRequest"];
 export type ChatResponse = components["schemas"]["ChatResponse"];
 export type ChatResponseData = ChatResponse;

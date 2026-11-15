@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
 import { changePassword, fetchSettings, saveSettings, type ShopSettings } from "@/lib/api/merchant";
 
 const POLICIES: [keyof ShopSettings["policies"], string, string, string][] = [
@@ -10,19 +10,29 @@ const POLICIES: [keyof ShopSettings["policies"], string, string, string][] = [
   ["installation", "Hỗ trợ Lắp đặt", "build", "Ví dụ: Hỗ trợ hướng dẫn lắp đặt miễn phí tại nhà"],
 ];
 
+const noSubscribe = () => () => {};
+
 /** Shop settings used by the bot: greeting, policies, AI advice switch, plus account password change. */
 export function SettingsTab({
   token,
   shopId,
+  shopSlug,
   onTokenUpdated,
 }: {
   token: string;
   shopId: string;
+  shopSlug: string;
   onTokenUpdated?: (newToken: string) => void;
 }) {
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [telegramToken, setTelegramToken] = useState("");
+  const [clearTelegram, setClearTelegram] = useState(false);
+  const widgetOrigin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => "");
+  const [copied, setCopied] = useState(false);
+
+  const embedCode = `<script src="${widgetOrigin}/widget.js" data-shop="${shopSlug}"></script>`;
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -46,7 +56,13 @@ export function SettingsTab({
     setSaving(true);
     setMessage(null);
     try {
-      setSettings(await saveSettings(token, shopId, settings));
+      setSettings(await saveSettings(token, shopId, {
+        ...settings,
+        telegram_bot_token: telegramToken || undefined,
+        clear_telegram: clearTelegram,
+      }));
+      setTelegramToken("");
+      setClearTelegram(false);
       setMessage({ text: "Đã lưu cấu hình trợ lý bán hàng thành công!" });
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Lưu thất bại", isError: true });
@@ -178,6 +194,36 @@ export function SettingsTab({
           </div>
         </div>
 
+        <div className="space-y-3 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-4">
+          <div>
+            <p className="text-sm font-semibold">Báo lead mới qua Telegram</p>
+            <p className="text-xs text-on-surface-variant">
+              {settings.telegram_configured ? "Đã kết nối. Để trống token nếu không đổi bot." : "Nhập Bot Token và Chat ID để nhận thông báo khi có khách để lại SĐT."}
+            </p>
+            <p className="mt-1 text-xs text-on-surface-variant">Hãy nhắn /start cho bot từ tài khoản Telegram nhận thông báo trước.</p>
+          </div>
+          <label className="block text-sm">
+            <span>Telegram Bot Token</span>
+            <input type="password" autoComplete="off" value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+              placeholder={settings.telegram_configured ? "Đã lưu token" : "123456:AA..."}
+              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            <span>Telegram Chat ID</span>
+            <input type="text" inputMode="numeric" value={settings.telegram_chat_id ?? ""}
+              onChange={(e) => setSettings({ ...settings, telegram_chat_id: e.target.value })}
+              placeholder="Ví dụ: 123456789"
+              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2" />
+          </label>
+          {settings.telegram_configured && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={clearTelegram} onChange={(e) => setClearTelegram(e.target.checked)} />
+              Tắt và xóa kết nối Telegram
+            </label>
+          )}
+        </div>
+
         {message && (
           <div
             className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
@@ -196,6 +242,23 @@ export function SettingsTab({
           {saving ? "Đang lưu cài đặt…" : "Lưu cài đặt Bot"}
         </button>
       </form>
+
+      <div className="h-fit space-y-3 rounded-3xl border border-outline-variant/60 bg-surface-container-lowest p-6 shadow-sm lg:col-start-2">
+        <h2 className="text-lg font-bold">Lấy mã nhúng Website / Shopify</h2>
+        <p className="text-sm text-on-surface-variant">Dán dòng này trước thẻ đóng body trong giao diện website của bạn.</p>
+        <textarea readOnly rows={3} value={widgetOrigin ? embedCode : "Đang tạo mã nhúng…"}
+          aria-label="Mã nhúng chat" className="w-full rounded-xl border border-outline-variant bg-surface p-3 font-mono text-xs" />
+        <button type="button" disabled={!widgetOrigin} onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(embedCode);
+            setCopied(true);
+          } catch {
+            setMessage({ text: "Không sao chép được. Hãy chọn mã nhúng trong ô và sao chép thủ công.", isError: true });
+          }
+        }} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary disabled:opacity-50">
+          {copied ? "Đã sao chép" : "Sao chép mã nhúng"}
+        </button>
+      </div>
 
       {/* Đổi mật khẩu tài khoản */}
       <form

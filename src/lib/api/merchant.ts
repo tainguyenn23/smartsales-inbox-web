@@ -1,5 +1,6 @@
 // Merchant dashboard API (Phase 4). Every call carries the bearer token.
 import { API_BASE_URL, ApiError, apiClient } from "./client";
+import type { components } from "@/types/generated/api";
 
 export interface MerchantShop {
   id: string;
@@ -30,6 +31,8 @@ export interface ShopStats {
   leads: number;
   top_products: { product_id: string; name: string; times_shown: number }[];
 }
+
+export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
 
 export interface ConversationSummary {
   id: string;
@@ -162,6 +165,10 @@ const shopPath = (shopId: string, path: string) => `/merchant/shops/${encodeURIC
 
 export function fetchStats(token: string, shopId: string, days = 30): Promise<ShopStats> {
   return apiClient(shopPath(shopId, "/stats"), { headers: auth(token), params: { days } });
+}
+
+export function fetchAnalytics(token: string, shopId: string, days = 30, limit = 10): Promise<AnalyticsSummary> {
+  return apiClient("/analytics", { headers: auth(token), params: { shop_id: shopId, days, limit } });
 }
 
 export function fetchConversations(token: string, shopId: string, page = 1): Promise<Page<ConversationSummary>> {
@@ -325,13 +332,20 @@ export interface ShopSettings {
   ai_advice_enabled: boolean;
   greeting: string | null;
   policies: { shipping: string | null; returns: string | null; warranty: string | null; installation: string | null };
+  telegram_chat_id: string | null;
+  telegram_configured: boolean;
 }
+
+export type ShopSettingsUpdate = ShopSettings & {
+  telegram_bot_token?: string;
+  clear_telegram?: boolean;
+};
 
 export function fetchSettings(token: string, shopId: string): Promise<ShopSettings> {
   return apiClient(shopPath(shopId, "/settings"), { headers: auth(token) });
 }
 
-export function saveSettings(token: string, shopId: string, settings: ShopSettings): Promise<ShopSettings> {
+export function saveSettings(token: string, shopId: string, settings: ShopSettingsUpdate): Promise<ShopSettings> {
   return apiClient(shopPath(shopId, "/settings"), {
     method: "PUT",
     headers: auth(token),

@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   createShop,
   deleteProduct,
+  fetchAnalytics,
   fetchConversations,
   fetchLeads,
   fetchMe,
@@ -20,6 +21,7 @@ import {
   registerMerchant,
   updateLeadStatus,
   type ConversationMessage,
+  type AnalyticsSummary,
   type ConversationSummary,
   type ImportResult,
   type Lead,
@@ -617,28 +619,42 @@ function CreateShopModal({
 }
 
 function Overview({ token, shopId, logout }: TabProps) {
-  const { data, error, loading } = useLoad<ShopStats>(() => fetchStats(token, shopId), logout, [token, shopId]);
-  const tiles: { label: string; value: number | string; icon: string; desc: string }[] = data
+  const [days, setDays] = useState(30);
+  const { data, error, loading } = useLoad<ShopStats>(() => fetchStats(token, shopId, days), logout, [token, shopId, days]);
+  const currentStats = loading ? null : data;
+  const tiles: { label: string; value: number | string; icon: string; desc: string }[] = currentStats
     ? [
-        { label: "Tổng hội thoại", value: data.conversations, icon: "forum", desc: "Khách đã nhắn tin" },
-        { label: "Tin nhắn khách", value: data.customer_messages, icon: "chat_bubble", desc: "Lượt câu hỏi nhận vào" },
+        { label: "Tổng hội thoại", value: currentStats.conversations, icon: "forum", desc: "Khách đã nhắn tin" },
+        { label: "Tin nhắn khách", value: currentStats.customer_messages, icon: "chat_bubble", desc: "Lượt câu hỏi nhận vào" },
         {
           label: "Xử lý bằng SQL (0 tốn AI)",
-          value: data.assistant_replies
-            ? `${Math.round((data.replies_without_ai / data.assistant_replies) * 100)}%`
+          value: currentStats.assistant_replies
+            ? `${Math.round((currentStats.replies_without_ai / currentStats.assistant_replies) * 100)}%`
             : "100%",
           icon: "bolt",
-          desc: `${data.replies_without_ai}/${data.assistant_replies} câu trả lời tức thì`,
+          desc: `${currentStats.replies_without_ai}/${currentStats.assistant_replies} câu trả lời tức thì`,
         },
-        { label: "Lượt gọi Gemini AI", value: data.ai_calls, icon: "auto_awesome", desc: "Chỉ dùng khi tư vấn/so sánh" },
-        { label: "Câu hỏi chưa có SP", value: data.no_result_replies, icon: "search_off", desc: "Xem chi tiết ở tab Nhu cầu" },
-        { label: "Khách để lại SĐT (Leads)", value: data.leads, icon: "contact_phone", desc: "Cơ hội chốt đơn" },
+        { label: "Lượt gọi Gemini AI", value: currentStats.ai_calls, icon: "auto_awesome", desc: "Chỉ dùng khi tư vấn/so sánh" },
+        { label: "Câu hỏi chưa có SP", value: currentStats.no_result_replies, icon: "search_off", desc: "Xem chi tiết ở tab Nhu cầu" },
+        { label: "Khách để lại SĐT (Leads)", value: currentStats.leads, icon: "contact_phone", desc: "Cơ hội chốt đơn" },
       ]
     : [];
   return (
+    <div className="space-y-5">
     <Card
-      title={`Báo cáo hoạt động ${data ? `(${data.days} ngày gần nhất)` : ""}`}
+      title={`Báo cáo hoạt động ${currentStats ? `(${currentStats.days} ngày gần nhất)` : ""}`}
       subtitle="Theo dõi hiệu quả tư vấn tự động của trợ lý bán hàng Catalog-First"
+      action={
+        <label className="flex items-center gap-2 text-sm font-medium text-on-surface-variant">
+          Khoảng thời gian
+          <select value={days} onChange={(event) => setDays(Number(event.target.value))}
+            className="min-h-10 rounded-xl border border-outline-variant bg-surface px-3 text-on-surface">
+            <option value={7}>7 ngày</option>
+            <option value={30}>30 ngày</option>
+            <option value={90}>90 ngày</option>
+          </select>
+        </label>
+      }
     >
       <Status loading={loading} error={error} />
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -659,27 +675,67 @@ function Overview({ token, shopId, logout }: TabProps) {
         ))}
       </div>
 
-      {data && data.top_products.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-outline-variant/40 bg-surface p-4">
-          <h3 className="mb-3 flex items-center gap-2 text-sm font-bold">
-            <span className="material-symbols-outlined text-[18px] text-primary">workspace_premium</span>
-            Top sản phẩm được khách hỏi & giới thiệu nhiều nhất
-          </h3>
-          <div className="divide-y divide-outline-variant/30">
-            {data.top_products.map((p, idx) => (
-              <div key={p.product_id} className="flex items-center justify-between py-2.5 text-sm">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-6 items-center justify-center rounded-full bg-primary-fixed text-xs font-bold text-primary">
-                    {idx + 1}
-                  </span>
-                  <span className="font-medium">{p.name}</span>
-                </div>
-                <span className="rounded-full bg-surface-container-high px-3 py-0.5 text-xs font-semibold">
-                  {p.times_shown} lần hiển thị
-                </span>
-              </div>
-            ))}
-          </div>
+    </Card>
+    <AnalyticsPanels token={token} shopId={shopId} logout={logout} days={days} />
+    </div>
+  );
+}
+
+function RankedMetric({ title, description, countLabel, items }: {
+  title: string;
+  description: string;
+  countLabel: string;
+  items: { key: string; label: string; count: number }[];
+}) {
+  return (
+    <section className="min-w-0 rounded-2xl border border-outline-variant/50 bg-surface p-4">
+      <h3 className="text-sm font-bold text-on-surface">{title}</h3>
+      <p className="mt-1 text-xs text-on-surface-variant">{description}</p>
+      {items.length ? (
+        <ol className="mt-4 divide-y divide-outline-variant/40">
+          {items.map((item, index) => (
+            <li key={item.key} className="flex items-start gap-3 py-2.5 text-sm">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary-fixed text-xs font-bold text-primary">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 break-words text-on-surface">{item.label}</span>
+              <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-semibold text-on-surface">
+                {item.count.toLocaleString("vi-VN")} {countLabel}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="mt-4 text-sm text-on-surface-variant">Chưa có dữ liệu trong khoảng thời gian này.</p>}
+    </section>
+  );
+}
+
+function AnalyticsPanels({ token, shopId, logout, days }: TabProps & { days: number }) {
+  const { data, error, loading, reload } = useLoad<AnalyticsSummary>(
+    () => fetchAnalytics(token, shopId, days), logout, [token, shopId, days],
+  );
+  const current = loading ? null : data;
+  return (
+    <Card title="Khách đang quan tâm" subtitle={`Câu hỏi, sản phẩm được gợi ý và lượt bấm trong ${days} ngày gần nhất`}
+      action={<button type="button" onClick={reload} disabled={loading}
+        className="min-h-10 rounded-xl border border-outline-variant px-3 text-sm font-semibold text-primary disabled:opacity-50">
+        Làm mới
+      </button>}>
+      <Status loading={loading} error={error} />
+      {current && !error && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <RankedMetric title="Tin nhắn khách gửi nhiều" description="Gồm câu hỏi và tin nhắn khác; API đã che SĐT, email."
+            countLabel="lượt" items={(current.top_queries ?? []).map((item) => ({
+              key: item.query, label: item.query, count: item.count,
+            }))} />
+          <RankedMetric title="Sản phẩm bot gợi ý nhiều" description="Đếm số lần sản phẩm xuất hiện trong thẻ gợi ý."
+            countLabel="lượt" items={(current.top_recommended ?? []).map((item) => ({
+              key: item.product_id, label: item.name, count: item.count,
+            }))} />
+          <RankedMetric title="Sản phẩm khách bấm nhiều" description="Lượt bấm xem hoặc mua; chưa phải số đơn hàng."
+            countLabel="lượt" items={(current.top_clicked ?? []).map((item) => ({
+              key: item.product_id, label: item.name, count: item.count,
+            }))} />
         </div>
       )}
     </Card>
@@ -1380,6 +1436,7 @@ export default function Dashboard() {
             key={props.shopId}
             token={props.token}
             shopId={props.shopId}
+            shopSlug={activeShop.slug}
             onTokenUpdated={writeToken}
           />
         )}

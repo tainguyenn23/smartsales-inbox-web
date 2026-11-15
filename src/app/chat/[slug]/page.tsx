@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useRef, useEffect, type FormEvent } from "react";
+import { use, useState, useRef, useEffect, useSyncExternalStore, type FormEvent } from "react";
 import { useChatDemo } from "@/features/chat/hooks/useChatDemo";
 import { LeadForm } from "@/features/chat/LeadForm";
 import type { StreamProductItem } from "@/types/api";
@@ -9,6 +9,8 @@ import Image from "next/image";
 interface ChatPageProps {
   params: Promise<{ slug: string }>;
 }
+
+const noSubscribe = () => () => {};
 
 /**
  * Định dạng tiền tệ an toàn từ chuỗi hoặc số Decimal.
@@ -49,6 +51,16 @@ export default function ChatPage({ params }: ChatPageProps) {
   } = useChatDemo(shopSlug);
 
   const [inputMessage, setInputMessage] = useState("");
+  const embedded = useSyncExternalStore(
+    noSubscribe,
+    () => new URLSearchParams(window.location.search).get("embed") === "true",
+    () => false,
+  );
+  const quickReplies = [
+    ...(shop?.categories ?? []).map((category) => ({ label: `🔎 ${category}`, message: category })),
+    { label: "💰 Mẫu dưới 1 triệu", message: "Mẫu dưới 1 triệu" },
+    { label: "🛡️ Chính sách bảo hành", message: "Chính sách bảo hành" },
+  ];
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Tự động cuộn xuống dưới cùng khi có tin nhắn mới hoặc đang stream
@@ -68,7 +80,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   return (
     <div className="bg-background text-on-background antialiased flex min-h-dvh flex-col">
       {/* TopAppBar */}
-      <header className="sticky top-0 z-50 flex min-h-16 w-full items-center justify-between border-b border-outline-variant bg-surface px-4 pt-[env(safe-area-inset-top)] dark:border-outline dark:bg-surface-container-low">
+      {!embedded && <header className="sticky top-0 z-50 flex min-h-16 w-full items-center justify-between border-b border-outline-variant bg-surface px-4 pt-[env(safe-area-inset-top)] dark:border-outline dark:bg-surface-container-low">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -91,10 +103,10 @@ export default function ChatPage({ params }: ChatPageProps) {
             Đang trực tuyến
           </span>
         </div>
-      </header>
+      </header>}
 
       {/* Main Chat Canvas */}
-      <main className="flex flex-1 flex-col gap-4 overflow-y-auto bg-background p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+      <main className={`flex flex-1 flex-col gap-4 overflow-y-auto bg-background p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] ${embedded ? "text-sm" : ""}`}>
         {shopError && (
           <div
             role="alert"
@@ -142,6 +154,22 @@ export default function ChatPage({ params }: ChatPageProps) {
             <p className="text-xs max-w-xs text-on-surface-variant">
               Hãy hỏi bất kỳ thông tin nào về sản phẩm, giá bán, hoặc tư vấn mua sắm.
             </p>
+          </div>
+        )}
+
+        {messages.length === 0 && shop && (
+          <div className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2" aria-label="Gợi ý câu hỏi">
+            {quickReplies.map((reply) => (
+              <button
+                key={reply.message}
+                type="button"
+                onClick={() => void sendMessage(reply.message)}
+                disabled={isLoading || isStreaming}
+                className="min-h-11 rounded-full border border-outline-variant bg-surface px-4 py-2 text-sm text-on-surface hover:bg-surface-container disabled:opacity-50"
+              >
+                {reply.label}
+              </button>
+            ))}
           </div>
         )}
 
