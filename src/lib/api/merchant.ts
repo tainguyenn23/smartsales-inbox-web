@@ -11,7 +11,7 @@ export interface MerchantShop {
 
 export interface LoginResult {
   access_token: string;
-  merchant: { id: string; email: string; display_name: string | null };
+  merchant: { id: string; email: string; display_name: string | null; is_admin?: boolean };
   shops: MerchantShop[];
 }
 
@@ -39,6 +39,7 @@ export interface ConversationSummary {
   customer_id: string;
   channel: string;
   status: string;
+  human_takeover_until?: string | null;
   message_count: number;
   last_message: string | null;
   last_message_at: string | null;
@@ -144,7 +145,7 @@ export function changePassword(
 }
 
 export function fetchMe(token: string): Promise<{
-  merchant: { id: string; email: string; display_name: string | null };
+  merchant: { id: string; email: string; display_name: string | null; is_admin?: boolean };
   shops: MerchantShop[];
 }> {
   return apiClient("/auth/me", { headers: auth(token) });
@@ -178,6 +179,19 @@ export function fetchConversations(token: string, shopId: string, page = 1): Pro
 export function fetchMessages(token: string, shopId: string, conversationId: string): Promise<ConversationMessage[]> {
   return apiClient(shopPath(shopId, `/conversations/${encodeURIComponent(conversationId)}/messages`), {
     headers: auth(token),
+  });
+}
+
+export function setConversationBotMode(
+  token: string,
+  shopId: string,
+  conversationId: string,
+  mode: "BOT_ACTIVE" | "HUMAN_TAKEOVER"
+): Promise<{ id: string; status: string; human_takeover_until: string | null }> {
+  return apiClient(shopPath(shopId, `/conversations/${encodeURIComponent(conversationId)}/status`), {
+    method: "PATCH",
+    headers: auth(token),
+    body: JSON.stringify({ mode }),
   });
 }
 
@@ -282,6 +296,69 @@ export async function importProductFile(token: string, shopId: string, file: Fil
   return payload.data as ImportResult;
 }
 
+export interface AsyncImportJobStart {
+  job_id: string;
+  shop_id: string;
+  platform: string;
+  status: string;
+  execution_mode: string;
+  progress_percent: number;
+}
+
+export interface AsyncImportJobStatus {
+  job_id: string;
+  shop_id: string;
+  platform: string;
+  source_name: string | null;
+  status: "queued" | "running" | "completed" | "failed";
+  progress_percent: number;
+  total_products: number;
+  processed_products: number;
+  created: number;
+  updated: number;
+  embedded: number;
+  embedding_skipped: number;
+  failed: number;
+  errors: { row_number: number; code?: string; reason: string }[];
+}
+
+export async function startAsyncProductImport(
+  token: string,
+  shopId: string,
+  options: { platform: string; file?: File; shopifyUrl?: string }
+): Promise<AsyncImportJobStart> {
+  const body = new FormData();
+  body.append("shop_id", shopId);
+  body.append("platform", options.platform);
+  if (options.file) body.append("file", options.file);
+  if (options.shopifyUrl) body.append("shopify_url", options.shopifyUrl);
+  const response = await fetch(`${API_BASE_URL}/products/import/async`, {
+    method: "POST",
+    headers: auth(token),
+    body,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.error) {
+    throw new ApiError(
+      payload?.error?.message || `Khởi tạo import thất bại (HTTP ${response.status})`,
+      response.status,
+      payload?.error?.code || `HTTP_${response.status}`
+    );
+  }
+  return payload.data as AsyncImportJobStart;
+}
+
+export function fetchImportJobStatus(
+  token: string,
+  shopId: string,
+  jobId: string
+): Promise<AsyncImportJobStatus> {
+  return apiClient(`/products/import/jobs/${encodeURIComponent(jobId)}`, {
+    headers: auth(token),
+    params: { shop_id: shopId },
+  });
+}
+
 export interface ProductVariantDetail {
   id: string;
   name: string | null;
@@ -328,17 +405,45 @@ export function patchProduct(token: string, shopId: string, productId: string, p
   });
 }
 
+export type PlanTier = "free" | "standard" | "pro" | "enterprise";
+
+export interface TenantQuotaSummary {
+  plan_tier: PlanTier;
+  bypass_quota: boolean;
+  daily_chats_used: number;
+  daily_chat_limit: number;
+  monthly_chats_used: number;
+  monthly_chat_limit: number;
+  monthly_tokens_used: number;
+  monthly_token_limit: number;
+  max_products_limit: number;
+  custom_api_key_configured: boolean;
+  custom_api_key_masked?: string | null;
+  custom_chat_model?: string | null;
+}
+
 export interface ShopSettings {
   ai_advice_enabled: boolean;
   greeting: string | null;
   policies: { shipping: string | null; returns: string | null; warranty: string | null; installation: string | null };
   telegram_chat_id: string | null;
   telegram_configured: boolean;
+  shopee_url?: string | null;
+  shopify_url?: string | null;
+  zalo_contact_url?: string | null;
+  catalog_url?: string | null;
+  hotline?: string | null;
+  quota?: TenantQuotaSummary | null;
 }
 
 export type ShopSettingsUpdate = ShopSettings & {
   telegram_bot_token?: string;
   clear_telegram?: boolean;
+  custom_api_key?: string;
+  clear_custom_api_key?: boolean;
+  custom_chat_model?: string | null;
+  plan_tier?: PlanTier;
+  bypass_quota?: boolean;
 };
 
 export function fetchSettings(token: string, shopId: string): Promise<ShopSettings> {

@@ -1,10 +1,10 @@
 "use client";
 
 import { use, useState, useRef, useEffect, useSyncExternalStore, type FormEvent } from "react";
-import { useChatDemo } from "@/features/chat/hooks/useChatDemo";
+import { ChatProductCard, useChatDemo } from "@/features/chat";
+import { ChatMarkdown } from "@/features/chat/ChatMarkdown";
 import { LeadForm } from "@/features/chat/LeadForm";
 import type { StreamProductItem } from "@/types/api";
-import Image from "next/image";
 
 interface ChatPageProps {
   params: Promise<{ slug: string }>;
@@ -199,13 +199,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                     </span>
                   </div>
                   <div className="bg-surface text-on-surface p-3 rounded-lg rounded-bl-none border border-outline-variant shadow-[0px_2px_4px_rgba(28,25,23,0.04),0px_1px_2px_rgba(28,25,23,0.02)]">
-                    <p className="text-sm whitespace-pre-wrap">
-                      {msg.content}
-                      {/* Cursor nhấp nháy khi đang stream text */}
-                      {msg.isStreaming && (
-                        <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
-                      )}
-                    </p>
+                    <ChatMarkdown content={msg.content} isStreaming={msg.isStreaming} />
                   </div>
                 </div>
                 <span className="text-on-surface-variant text-[10px] pl-10">
@@ -215,116 +209,125 @@ export default function ChatPage({ params }: ChatPageProps) {
                   })}
                 </span>
 
-                {/* Product Carousel — dùng StreamProductItem từ SSE */}
+                {/* Product Carousel — dùng StreamProductItem từ SSE, sắp đúng thứ tự nhắc tới */}
                 {msg.products && msg.products.length > 0 && (
                   <div className="w-full pl-10 -mr-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory flex gap-4 pb-4 pt-2">
-                    {msg.products.map((product: StreamProductItem) => {
-                      // Ưu tiên affiliate_url → product_url theo spec
-                      const productUrl = product.affiliate_url ?? product.product_url;
-                      return (
-                        <article
+                    {[...msg.products]
+                      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+                      .map((product: StreamProductItem, idx: number) => (
+                        <ChatProductCard
                           key={product.product_id}
-                          className="snap-center shrink-0 w-[85%] max-w-70 bg-surface border border-outline-variant rounded-lg overflow-hidden flex flex-col shadow-[0px_2px_4px_rgba(28,25,23,0.04),0px_1px_2px_rgba(28,25,23,0.02)]"
-                        >
-                          <div className="relative w-full aspect-4/3 bg-surface-container-high">
-                            {product.image_url ? (
-                              <div className="relative w-full h-full">
-                                <Image
-                                  src={product.image_url}
-                                  alt={product.name}
-                                  fill
-                                  unoptimized
-                                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                  className="object-cover"
-                                />
-                              </div>
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-outline">
-                                <span className="material-symbols-outlined text-4xl">image</span>
-                              </div>
-                            )}
-                            {/* Badge rank */}
-                            {product.rank === 1 && (
-                              <div className="absolute top-2 right-2 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-amber-900">
-                                #1
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="p-3 flex flex-col gap-2 flex-1">
-                            <h3 className="text-sm font-bold text-on-surface line-clamp-1">
-                              {product.name}
-                            </h3>
-
-                            {/* Giá từ variant đầu tiên in-stock */}
-                            {product.variants && product.variants.length > 0 && (
-                              <p className="text-sm text-primary font-bold">
-                                {formatCurrency(product.variants[0].price, product.currency)}
-                                {product.variants.length > 1 && (
-                                  <span className="text-xs text-on-surface-variant font-normal ml-1">
-                                    và {product.variants.length - 1} loại khác
-                                  </span>
-                                )}
-                              </p>
-                            )}
-
-                            {/* Preview các variant in-stock */}
-                            {product.variants && product.variants.length > 0 && (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {product.variants.slice(0, 3).map((variant, vIdx) => (
-                                  <div
-                                    key={variant.id || vIdx}
-                                    className="w-full rounded border border-outline-variant bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant"
-                                  >
-                                    <span className="font-semibold">
-                                      {Object.entries(variant.attributes || {})
-                                        .map(([key, value]) => `${key}: ${value}`)
-                                        .join(" · ") || variant.name || `Loại ${vIdx + 1}`}
-                                    </span>
-                                    {variant.price && (
-                                      <span>
-                                        {" "}
-                                        · {formatCurrency(variant.price, product.currency)}
-                                      </span>
-                                    )}
-                                  </div>
-                                ))}
-                                {product.variants.length > 3 && (
-                                  <span className="text-[10px] text-on-surface-variant">
-                                    +{product.variants.length - 3} loại
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            <div className="mt-auto pt-3 flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleProductClick(product)}
-                                disabled={!productUrl}
-                                className="min-h-11 flex-1 rounded-lg border border-primary bg-surface px-2 text-center text-xs font-bold text-primary transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Xem Chi Tiết
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleProductClick(product)}
-                                disabled={!productUrl}
-                                className="min-h-11 flex-1 rounded-lg bg-primary-container px-2 text-center text-xs font-bold text-on-primary transition-colors hover:bg-[#053e2f] disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Mua Ngay
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
+                          product={product}
+                          displayRank={idx + 1}
+                          formatCurrency={formatCurrency}
+                          onProductClick={handleProductClick}
+                        />
+                      ))}
                   </div>
                 )}
 
                 {/* Form để lại tên/SĐT khi khách đã chọn mẫu muốn mua */}
                 {msg.leadForm && !msg.isStreaming && (
                   <LeadForm onSubmit={sendMessage} disabled={isLoading || isStreaming} />
+                )}
+
+                {/* Thẻ Điều hướng Gian hàng khi có > 20 kết quả khớp */}
+                {msg.openStore && !msg.isStreaming && (
+                  <div className="ml-10 max-w-md rounded-xl border border-primary/40 bg-surface p-3.5 shadow-xs">
+                    <p className="text-xs font-bold text-primary">
+                      🛍️ Có tới {msg.openStore.totalMatches} sản phẩm phù hợp tại cửa hàng!
+                    </p>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      Mở gian hàng chính thức để lọc và xem trọn bộ mẫu mã đầy đủ nhất:
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      {msg.openStore.links.shopee_url && (
+                        <a
+                          href={msg.openStore.links.shopee_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
+                        >
+                          Xem trên Shopee ↗
+                        </a>
+                      )}
+                      {msg.openStore.links.shopify_url && (
+                        <a
+                          href={msg.openStore.links.shopify_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
+                        >
+                          Xem Website / Shopify ↗
+                        </a>
+                      )}
+                      {msg.openStore.links.catalog_url && (
+                        <a
+                          href={msg.openStore.links.catalog_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-primary px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-surface-container-low"
+                        >
+                          Mở Catalog đầy đủ ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Thẻ Chuyển giao Nhân viên / Chủ shop (Human Handoff) */}
+                {msg.humanHandoff && !msg.isStreaming && (
+                  <div className="ml-10 max-w-md rounded-xl border border-amber-300 bg-amber-50/80 p-3.5 text-amber-950 shadow-xs">
+                    <p className="text-xs font-bold">
+                      {msg.humanHandoff.locked
+                        ? "👩‍💼 Đã kết nối trực tiếp tới Chủ Shop / Nhân viên tư vấn"
+                        : "💬 Bạn cần nhân viên kiểm tra kho hoặc tư vấn riêng?"}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-900/90">
+                      {msg.humanHandoff.locked
+                        ? "Thông tin hội thoại đã được gửi tới nhân viên hỗ trợ. Bạn cũng có thể nhắn trực tiếp qua kênh bên dưới:"
+                        : "Bạn có thể thử gõ lại tên mẫu khác, hoặc bấm liên hệ trực tiếp với shop:"}
+                    </p>
+                    {(msg.humanHandoff.zaloUrl || msg.humanHandoff.hotline) && (
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        {msg.humanHandoff.zaloUrl && (
+                          <a
+                            href={msg.humanHandoff.zaloUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
+                          >
+                            Chat Zalo ngay ↗
+                          </a>
+                        )}
+                        {msg.humanHandoff.hotline && (
+                          <a
+                            href={`tel:${msg.humanHandoff.hotline.replace(/\s+/g, "")}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-amber-700 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 transition hover:bg-amber-100/50"
+                          >
+                            📞 Gọi {msg.humanHandoff.hotline}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Gợi ý câu hỏi tiếp nối (Suggestions) */}
+                {!msg.isStreaming && msg.suggestions && msg.suggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-10 pt-1" aria-label="Gợi ý hỏi tiếp">
+                    {msg.suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => void sendMessage(suggestion)}
+                        disabled={isLoading || isStreaming}
+                        className="rounded-full border border-primary/40 bg-surface-container-lowest px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary-fixed/40 disabled:opacity-50"
+                      >
+                        ✨ {suggestion}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             )}

@@ -14,7 +14,7 @@ export interface ApiResponse<T> {
 
 export type ShopOut = components["schemas"]["ShopOut"] & { categories?: string[] };
 export type ChatRequest = components["schemas"]["ChatRequest"];
-export type ChatResponse = components["schemas"]["ChatResponse"];
+export type ChatResponse = components["schemas"]["ChatResponse"] & { suggestions?: string[] };
 export type ChatResponseData = ChatResponse;
 export type ProductCard = components["schemas"]["ProductCard"];
 export type ProductVariantPreview = components["schemas"]["ProductVariantPreview"];
@@ -24,25 +24,15 @@ export type ConversationChannel = NonNullable<ChatRequest["channel"]>;
 export type IntentName = ChatResponse["intent"];
 export type StockStatus = ProductCard["availability"];
 
-// ---------------------------------------------------------------------------
-// SSE streaming contract — POST /api/v1/chat/stream
-// Các type dưới đây khớp với contract trong backend-frontend-api-map.md.
-// price chấp nhận number | string | null trong giai đoạn chuyển tiếp (NUMERIC
-// từ SQLAlchemy có thể được JSON encode thành số hoặc chuỗi).
-// ---------------------------------------------------------------------------
-
-/** Một variant in-stock được trả về trong stream products event */
 export interface StreamProductVariant {
   id: string;
   name: string;
   attributes: Record<string, string>;
-  /** Decimal-safe: có thể là số hoặc chuỗi số tuỳ version backend */
   price: number | string | null;
   stock_status: string;
   image_url?: string | null;
 }
 
-/** Product object trong stream — khác ProductCard ở JSON endpoint */
 export interface StreamProductItem {
   product_id: string;
   name: string;
@@ -52,14 +42,11 @@ export interface StreamProductItem {
   image_url?: string | null;
   product_url?: string | null;
   affiliate_url?: string | null;
-  /** Chỉ chứa variant in-stock khớp filter */
   variants: StreamProductVariant[];
   cosine_similarity?: number | null;
   score: number;
   rank: number;
 }
-
-// --- SSE event payload types ---
 
 export interface StreamMetaEvent {
   conversation_id: string;
@@ -70,8 +57,17 @@ export interface StreamProductsEvent {
   products: StreamProductItem[];
 }
 
+export interface StreamSuggestionsEvent {
+  suggestions: string[];
+}
+
 export interface StreamTokenEvent {
   text: string;
+}
+
+export interface StreamResetEvent {
+  content?: string;
+  reason?: string;
 }
 
 export interface StreamErrorEvent {
@@ -79,14 +75,27 @@ export interface StreamErrorEvent {
   message: string;
 }
 
-/** Additive event (Phase 4.5): the client should show a UI element, e.g. a lead form. */
-export interface StreamActionEvent {
-  type: "lead_form";
-}
+export type StreamActionEvent =
+  | { type: "lead_form" }
+  | {
+      type: "open_store";
+      total_matches?: number;
+      store_links?: {
+        shopee_url?: string;
+        shopify_url?: string;
+        catalog_url?: string;
+      };
+    }
+  | {
+      type: "human_handoff";
+      locked?: boolean;
+      reason?: string;
+      zalo_url?: string | null;
+      hotline?: string | null;
+    };
 
 export interface StreamDoneEvent {
   message_id: string;
   saved: boolean;
   status: string;
 }
-

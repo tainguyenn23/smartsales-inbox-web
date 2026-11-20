@@ -10,9 +10,16 @@ const POLICIES: [keyof ShopSettings["policies"], string, string, string][] = [
   ["installation", "Hỗ trợ Lắp đặt", "build", "Ví dụ: Hỗ trợ hướng dẫn lắp đặt miễn phí tại nhà"],
 ];
 
+const TIER_BADGE: Record<string, { label: string; className: string }> = {
+  free: { label: "FREE TIER", className: "bg-stone-200 text-stone-800" },
+  standard: { label: "STANDARD", className: "bg-sky-100 text-sky-900" },
+  pro: { label: "PRO · BYOK", className: "bg-indigo-100 text-indigo-900" },
+  enterprise: { label: "ENTERPRISE", className: "bg-amber-100 text-amber-900" },
+};
+
 const noSubscribe = () => () => {};
 
-/** Shop settings used by the bot: greeting, policies, AI advice switch, plus account password change. */
+/** Shop settings used by the bot: greeting, policies, AI advice switch, tier/BYOK config, plus password change. */
 export function SettingsTab({
   token,
   shopId,
@@ -29,6 +36,9 @@ export function SettingsTab({
   const [saving, setSaving] = useState(false);
   const [telegramToken, setTelegramToken] = useState("");
   const [clearTelegram, setClearTelegram] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [clearCustomKey, setClearCustomKey] = useState(false);
+  const [customChatModel, setCustomChatModel] = useState("");
   const widgetOrigin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => "");
   const [copied, setCopied] = useState(false);
 
@@ -43,7 +53,11 @@ export function SettingsTab({
   useEffect(() => {
     let active = true;
     fetchSettings(token, shopId)
-      .then((value) => active && setSettings(value))
+      .then((value) => {
+        if (!active) return;
+        setSettings(value);
+        setCustomChatModel(value.quota?.custom_chat_model ?? "");
+      })
       .catch(() => active && setMessage({ text: "Không tải được cài đặt", isError: true }));
     return () => {
       active = false;
@@ -53,16 +67,29 @@ export function SettingsTab({
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!settings) return;
+    const tier = settings.quota?.plan_tier ?? "free";
+    const canEditCustomLlm = tier === "pro" || tier === "enterprise";
     setSaving(true);
     setMessage(null);
     try {
-      setSettings(await saveSettings(token, shopId, {
+      const updated = await saveSettings(token, shopId, {
         ...settings,
         telegram_bot_token: telegramToken || undefined,
         clear_telegram: clearTelegram,
-      }));
+        ...(canEditCustomLlm
+          ? {
+              custom_api_key: customApiKey.trim() || undefined,
+              clear_custom_api_key: clearCustomKey,
+              custom_chat_model: customChatModel.trim(),
+            }
+          : {}),
+      });
+      setSettings(updated);
+      setCustomChatModel(updated.quota?.custom_chat_model ?? "");
       setTelegramToken("");
       setClearTelegram(false);
+      setCustomApiKey("");
+      setClearCustomKey(false);
       setMessage({ text: "Đã lưu cấu hình trợ lý bán hàng thành công!" });
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Lưu thất bại", isError: true });
@@ -108,6 +135,11 @@ export function SettingsTab({
     );
   }
 
+  const quota = settings.quota;
+  const tierKey = quota?.plan_tier ?? "free";
+  const tierBadge = TIER_BADGE[tierKey] ?? TIER_BADGE.free;
+  const canCustomLlm = tierKey === "pro" || tierKey === "enterprise";
+
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       {/* Cài đặt Bot */}
@@ -120,17 +152,108 @@ export function SettingsTab({
             <span className="material-symbols-outlined text-[22px]">smart_toy</span>
           </div>
           <div>
-            <h2 className="text-lg font-bold">Cấu hình Trợ lý Bán hàng</h2>
+            <h2 className="text-lg font-bold">Cấu hình Trợ lý Bán hàng RAG</h2>
             <p className="text-xs text-on-surface-variant">
-              Tuỳ chỉnh lời chào, chế độ AI và các chính sách cửa hàng để bot trả lời chính xác 100%
+              Tuỳ chỉnh chế độ AI Hybrid RAG, gói cước, lời chào và chính sách chuẩn của cửa hàng
             </p>
           </div>
         </div>
 
+        {/* Thông tin Gói cước & Hạn mức Quota */}
+        {quota && (
+          <div className="space-y-3 rounded-2xl border border-outline-variant/60 bg-surface-container-low p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-on-surface">Gói dịch vụ hiện tại:</span>
+                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${tierBadge.className}`}>
+                  {tierBadge.label}
+                </span>
+                {quota.bypass_quota && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                    Admin Bypass
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-on-surface-variant">
+                Tối đa {quota.max_products_limit > 0 ? `${quota.max_products_limit.toLocaleString("vi-VN")} SP` : "Không giới hạn SP"}
+              </span>
+            </div>
+
+            <div className="grid gap-2.5 text-xs sm:grid-cols-3">
+              <div className="rounded-xl border border-outline-variant/40 bg-surface p-2.5">
+                <p className="text-on-surface-variant">Chat hôm nay</p>
+                <p className="mt-0.5 font-bold text-on-surface">
+                  {quota.daily_chats_used.toLocaleString("vi-VN")} /{" "}
+                  {quota.daily_chat_limit > 0 ? quota.daily_chat_limit.toLocaleString("vi-VN") : "∞"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-outline-variant/40 bg-surface p-2.5">
+                <p className="text-on-surface-variant">Chat trong tháng</p>
+                <p className="mt-0.5 font-bold text-on-surface">
+                  {quota.monthly_chats_used.toLocaleString("vi-VN")} /{" "}
+                  {quota.monthly_chat_limit > 0 ? quota.monthly_chat_limit.toLocaleString("vi-VN") : "∞"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-outline-variant/40 bg-surface p-2.5">
+                <p className="text-on-surface-variant">Tokens tháng này</p>
+                <p className="mt-0.5 font-bold text-on-surface">
+                  {quota.monthly_tokens_used.toLocaleString("vi-VN")} /{" "}
+                  {quota.monthly_token_limit > 0 ? quota.monthly_token_limit.toLocaleString("vi-VN") : "∞"}
+                </p>
+              </div>
+            </div>
+
+            {canCustomLlm && (
+              <div className="space-y-2.5 border-t border-outline-variant/40 pt-3">
+                <p className="text-xs font-bold text-primary">
+                  Cấu hình Gemini Engine riêng (Gói Pro / Enterprise BYOK)
+                </p>
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  <label className="block text-xs">
+                    <span className="font-semibold text-on-surface">Tên Model Gemini tùy chỉnh</span>
+                    <input
+                      type="text"
+                      value={customChatModel}
+                      onChange={(e) => setCustomChatModel(e.target.value)}
+                      placeholder="VD: gemini-2.5-flash hoặc gemini-2.5-pro"
+                      className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="font-semibold text-on-surface">Custom Gemini API Key</span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={customApiKey}
+                      onChange={(e) => setCustomApiKey(e.target.value)}
+                      placeholder={
+                        quota.custom_api_key_configured
+                          ? `Đã lưu (${quota.custom_api_key_masked ?? "••••"})`
+                          : "AIzaSy..."
+                      }
+                      className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                    />
+                  </label>
+                </div>
+                {quota.custom_api_key_configured && (
+                  <label className="flex items-center gap-2 text-xs text-on-surface-variant">
+                    <input
+                      type="checkbox"
+                      checked={clearCustomKey}
+                      onChange={(e) => setClearCustomKey(e.target.checked)}
+                    />
+                    Xóa Custom API Key hiện tại và quay về dùng Key hệ thống
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-4 transition hover:border-primary/40">
           <div className="space-y-1">
             <span className="flex items-center gap-2 text-sm font-bold text-on-surface">
-              Bật AI tư vấn chuyên sâu (Gemini)
+              Bật AI Tư vấn Hybrid RAG (Gemini Streaming)
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                   settings.ai_advice_enabled
@@ -142,8 +265,8 @@ export function SettingsTab({
               </span>
             </span>
             <p className="text-xs leading-relaxed text-on-surface-variant">
-              Các câu hỏi giá, tồn kho, màu/size luôn trả lời trực tiếp từ SQL (0 tốn AI). Khi bật mục này,
-              bot sẽ dùng thêm Gemini khi khách nhờ tư vấn chọn mẫu hoặc so sánh sản phẩm.
+              Kết hợp tìm kiếm SQL Variant + Keyword + Vector pgvector và tư vấn thời gian thực qua Gemini
+              (tự động kích hoạt Context Caching tối ưu chi phí). Khi tắt sẽ trả lời bằng mẫu SQL thuần.
             </p>
           </div>
           <input
@@ -169,7 +292,7 @@ export function SettingsTab({
           <div>
             <p className="text-sm font-semibold text-on-surface">Chính sách chuẩn của Shop</p>
             <p className="text-xs text-on-surface-variant">
-              Bot sẽ trả lời đúng nguyên văn nội dung bạn nhập dưới đây, tuyệt đối không tự bịa chính sách.
+              Bot sẽ nạp vào Context Cache và trả lời đúng nguyên văn nội dung dưới đây, không tự bịa chính sách.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -196,29 +319,108 @@ export function SettingsTab({
 
         <div className="space-y-3 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-4">
           <div>
+            <p className="text-sm font-semibold text-on-surface">
+              Điều hướng Gian hàng & Kênh Chuyển giao Nhân viên (Handoff)
+            </p>
+            <p className="text-xs text-on-surface-variant">
+              Khi có trên 20 sản phẩm khớp, bot sẽ kèm nút mở gian hàng. Khi khách cần nhân viên, bot gửi nút Zalo/Hotline.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs">
+              <span className="font-semibold text-on-surface">Shopee Store URL</span>
+              <input
+                type="url"
+                value={settings.shopee_url ?? ""}
+                onChange={(e) => setSettings({ ...settings, shopee_url: e.target.value })}
+                placeholder="https://shopee.vn/ten-shop"
+                className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-semibold text-on-surface">Shopify / Website URL</span>
+              <input
+                type="url"
+                value={settings.shopify_url ?? ""}
+                onChange={(e) => setSettings({ ...settings, shopify_url: e.target.value })}
+                placeholder="https://yourstore.myshopify.com"
+                className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-semibold text-on-surface">Link Catalog đầy đủ</span>
+              <input
+                type="url"
+                value={settings.catalog_url ?? ""}
+                onChange={(e) => setSettings({ ...settings, catalog_url: e.target.value })}
+                placeholder="https://..."
+                className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-semibold text-on-surface">Zalo OA / Liên hệ trực tiếp</span>
+              <input
+                type="url"
+                value={settings.zalo_contact_url ?? ""}
+                onChange={(e) => setSettings({ ...settings, zalo_contact_url: e.target.value })}
+                placeholder="https://zalo.me/0912345678"
+                className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              />
+            </label>
+            <label className="block text-xs sm:col-span-2">
+              <span className="font-semibold text-on-surface">Số Hotline hỗ trợ nhanh</span>
+              <input
+                type="tel"
+                value={settings.hotline ?? ""}
+                onChange={(e) => setSettings({ ...settings, hotline: e.target.value })}
+                placeholder="VD: 0912 345 678"
+                className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-4">
+          <div>
             <p className="text-sm font-semibold">Báo lead mới qua Telegram</p>
             <p className="text-xs text-on-surface-variant">
-              {settings.telegram_configured ? "Đã kết nối. Để trống token nếu không đổi bot." : "Nhập Bot Token và Chat ID để nhận thông báo khi có khách để lại SĐT."}
+              {settings.telegram_configured
+                ? "Đã kết nối. Để trống token nếu không đổi bot."
+                : "Nhập Bot Token và Chat ID để nhận thông báo khi có khách để lại SĐT."}
             </p>
-            <p className="mt-1 text-xs text-on-surface-variant">Hãy nhắn /start cho bot từ tài khoản Telegram nhận thông báo trước.</p>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              Hãy nhắn /start cho bot từ tài khoản Telegram nhận thông báo trước.
+            </p>
           </div>
           <label className="block text-sm">
             <span>Telegram Bot Token</span>
-            <input type="password" autoComplete="off" value={telegramToken}
+            <input
+              type="password"
+              autoComplete="off"
+              value={telegramToken}
               onChange={(e) => setTelegramToken(e.target.value)}
               placeholder={settings.telegram_configured ? "Đã lưu token" : "123456:AA..."}
-              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2" />
+              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2"
+            />
           </label>
           <label className="block text-sm">
             <span>Telegram Chat ID</span>
-            <input type="text" inputMode="numeric" value={settings.telegram_chat_id ?? ""}
+            <input
+              type="text"
+              inputMode="numeric"
+              value={settings.telegram_chat_id ?? ""}
               onChange={(e) => setSettings({ ...settings, telegram_chat_id: e.target.value })}
               placeholder="Ví dụ: 123456789"
-              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2" />
+              className="mt-1 w-full rounded-xl border border-outline-variant bg-surface px-3 py-2"
+            />
           </label>
           {settings.telegram_configured && (
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={clearTelegram} onChange={(e) => setClearTelegram(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={clearTelegram}
+                onChange={(e) => setClearTelegram(e.target.checked)}
+              />
               Tắt và xóa kết nối Telegram
             </label>
           )}
@@ -245,17 +447,32 @@ export function SettingsTab({
 
       <div className="h-fit space-y-3 rounded-3xl border border-outline-variant/60 bg-surface-container-lowest p-6 shadow-sm lg:col-start-2">
         <h2 className="text-lg font-bold">Lấy mã nhúng Website / Shopify</h2>
-        <p className="text-sm text-on-surface-variant">Dán dòng này trước thẻ đóng body trong giao diện website của bạn.</p>
-        <textarea readOnly rows={3} value={widgetOrigin ? embedCode : "Đang tạo mã nhúng…"}
-          aria-label="Mã nhúng chat" className="w-full rounded-xl border border-outline-variant bg-surface p-3 font-mono text-xs" />
-        <button type="button" disabled={!widgetOrigin} onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(embedCode);
-            setCopied(true);
-          } catch {
-            setMessage({ text: "Không sao chép được. Hãy chọn mã nhúng trong ô và sao chép thủ công.", isError: true });
-          }
-        }} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary disabled:opacity-50">
+        <p className="text-sm text-on-surface-variant">
+          Dán dòng này trước thẻ đóng body trong giao diện website của bạn.
+        </p>
+        <textarea
+          readOnly
+          rows={3}
+          value={widgetOrigin ? embedCode : "Đang tạo mã nhúng…"}
+          aria-label="Mã nhúng chat"
+          className="w-full rounded-xl border border-outline-variant bg-surface p-3 font-mono text-xs"
+        />
+        <button
+          type="button"
+          disabled={!widgetOrigin}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(embedCode);
+              setCopied(true);
+            } catch {
+              setMessage({
+                text: "Không sao chép được. Hãy chọn mã nhúng trong ô và sao chép thủ công.",
+                isError: true,
+              });
+            }
+          }}
+          className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary disabled:opacity-50"
+        >
           {copied ? "Đã sao chép" : "Sao chép mã nhúng"}
         </button>
       </div>

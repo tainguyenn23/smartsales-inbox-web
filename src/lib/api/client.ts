@@ -7,22 +7,32 @@ import type {
   ShopOut,
   StreamMetaEvent,
   StreamProductsEvent,
+  StreamSuggestionsEvent,
   StreamTokenEvent,
+  StreamResetEvent,
   StreamErrorEvent,
   StreamDoneEvent,
   StreamActionEvent,
 } from "@/types/api";
 
 const DEFAULT_BASE_URL = "http://localhost:8000/api/v1";
+const MERCHANT_TOKEN_KEY = "smartsales.merchant.token";
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE_URL).replace(
   /\/+$/,
   ""
 );
 
-/**
- * Custom error class containing HTTP status, backend error code, and X-Request-ID
- */
+function readOptionalMerchantBearer(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const token = window.localStorage.getItem(MERCHANT_TOKEN_KEY);
+    return token && token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -49,10 +59,6 @@ export interface ApiClientOptions extends RequestInit {
   params?: Record<string, string | number | boolean | null | undefined>;
 }
 
-/**
- * Typed HTTP client wrapper for SmartSales FastAPI backend
- * Decodes standard envelope ApiResponse<T> -> returns T
- */
 export async function apiClient<T>(endpoint: string, options: ApiClientOptions = {}): Promise<T> {
   const { params, headers, ...customConfig } = options;
 
@@ -117,7 +123,6 @@ export async function apiClient<T>(endpoint: string, options: ApiClientOptions =
     );
   }
 
-  // Handle envelope errors or non-2xx status
   if (!response.ok || payload.error) {
     const errorCode = payload.error?.code || `HTTP_${response.status}`;
     const errorMessage = payload.error?.message || `Request failed with status ${response.status}`;
@@ -144,13 +149,10 @@ export function fetchShop(slug: string, signal?: AbortSignal): Promise<ShopOut> 
   return apiClient<ShopOut>(`/shops/${encodeURIComponent(slug)}`, { signal });
 }
 
-/**
- * Fallback JSON chat — giữ lại để test và tương thích client chưa hỗ trợ SSE.
- * UI mới nên dùng streamChat() thay thế.
- */
 export function sendChatMessage(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
   return apiClient<ChatResponse>("/chat", {
     method: "POST",
+    headers: readOptionalMerchantBearer(),
     body: JSON.stringify(request),
     signal,
   });
@@ -164,17 +166,13 @@ export interface StreamChatCallbacks {
   onMeta: (event: StreamMetaEvent) => void;
   onProducts: (event: StreamProductsEvent) => void;
   onToken: (event: StreamTokenEvent) => void;
-  /** SSE error event — tiếp tục đọc tới done, không throw */
+  onReset?: (event: StreamResetEvent) => void;
   onError: (event: StreamErrorEvent) => void;
   onDone: (event: StreamDoneEvent) => void;
-  /** Optional UI hint, e.g. show the name/phone form after an order. */
   onAction?: (event: StreamActionEvent) => void;
+  onSuggestions?: (event: StreamSuggestionsEvent) => void;
 }
 
-/**
- * Parse một SSE frame (văn bản giữa hai \n\n).
- * Trả về { eventType, data } hoặc null nếu là keep-alive comment.
- */
 function parseSseFrame(frame: string): { eventType: string; data: unknown } | null {
   const lines = frame.split("\n");
   let eventType = "message";
@@ -182,7 +180,6 @@ function parseSseFrame(frame: string): { eventType: string; data: unknown } | nu
 
   for (const line of lines) {
     if (line.startsWith(":")) {
-      // keep-alive comment — bỏ qua
       continue;
     }
     if (line.startsWith("event:")) {
@@ -202,15 +199,6 @@ function parseSseFrame(frame: string): { eventType: string; data: unknown } | nu
   }
 }
 
-/**
- * Gọi POST /api/v1/chat/stream, đọc SSE và dispatch callbacks theo event type.
- *
- * Thứ tự event backend đảm bảo: meta → products → token… → done
- * - Lỗi trước stream (non-2xx) → throw ApiError (decode JSON error envelope)
- * - SSE `error` event → gọi onError, tiếp tục đọc tới done
- * - `done` event → gọi onDone rồi return
- * - AbortError được re-throw để caller có thể phân biệt cancel vs lỗi thật
- */
 export async function streamChat(
   request: ChatRequest,
   callbacks: StreamChatCallbacks,
@@ -225,13 +213,13 @@ export async function streamChat(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        ...readOptionalMerchantBearer(),
       },
       body: JSON.stringify(request),
       signal,
       cache: "no-store",
     });
   } catch (networkError) {
-    // Re-throw AbortError nguyên vẹn để caller biết đây là cancel chủ động
     if (networkError instanceof DOMException && networkError.name === "AbortError") {
       throw networkError;
     }
@@ -243,7 +231,6 @@ export async function streamChat(
     );
   }
 
-  // Lỗi trước khi stream bắt đầu — backend trả JSON error envelope
   if (!response.ok) {
     const requestId =
       response.headers.get("x-request-id") || response.headers.get("X-Request-ID");
@@ -262,7 +249,7 @@ export async function streamChat(
         errorMessage = errPayload.error.message || errorMessage;
       }
     } catch {
-      // không parse được JSON — giữ default
+      // keep default
     }
 
     throw new ApiError(errorMessage, response.status, errorCode, requestId, retryAfter);
@@ -280,9 +267,7 @@ export async function streamChat(
       const { value = "", done } = await reader.read();
       buffer += value;
 
-      // Split theo double newline — mỗi SSE frame kết thúc bằng \n\n
       const frames = buffer.split("\n\n");
-      // Phần cuối chưa hoàn chỉnh (chưa có \n\n) — giữ lại trong buffer
       buffer = frames.pop() ?? "";
 
       for (const frame of frames) {
@@ -299,19 +284,24 @@ export async function streamChat(
           case "products":
             callbacks.onProducts(data as StreamProductsEvent);
             break;
+          case "suggestions":
+            callbacks.onSuggestions?.(data as StreamSuggestionsEvent);
+            break;
           case "token":
             callbacks.onToken(data as StreamTokenEvent);
+            break;
+          case "reset":
+          case "replace":
+            callbacks.onReset?.(data as StreamResetEvent);
             break;
           case "action":
             callbacks.onAction?.(data as StreamActionEvent);
             break;
           case "error":
-            // SSE-level error — báo cáo nhưng tiếp tục đọc tới done
             callbacks.onError(data as StreamErrorEvent);
             break;
           case "done":
             callbacks.onDone(data as StreamDoneEvent);
-            // done là event cuối cùng — dừng ngay
             reader.cancel().catch(() => undefined);
             return;
           default:

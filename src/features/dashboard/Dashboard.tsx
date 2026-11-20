@@ -8,18 +8,21 @@ import {
   deleteProduct,
   fetchAnalytics,
   fetchConversations,
+  fetchImportJobStatus,
   fetchLeads,
   fetchMe,
   fetchMessages,
   fetchProducts,
   fetchStats,
   fetchUnmetDemand,
-  importProductFile,
   login,
   loginWithGoogle,
   patchProduct,
   registerMerchant,
+  setConversationBotMode,
+  startAsyncProductImport,
   updateLeadStatus,
+  type AsyncImportJobStatus,
   type ConversationMessage,
   type AnalyticsSummary,
   type ConversationSummary,
@@ -749,6 +752,9 @@ function Products({ token, shopId, logout }: TabProps) {
   const [inStockOnly, setInStockOnly] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importPlatform, setImportPlatform] = useState<"auto" | "shopee" | "shopify" | "shopify_url" | "smartsales">("auto");
+  const [shopifyImportUrl, setShopifyImportUrl] = useState("");
+  const [activeJob, setActiveJob] = useState<AsyncImportJobStatus | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | "create" | null>(null);
@@ -759,14 +765,57 @@ function Products({ token, shopId, logout }: TabProps) {
     [token, shopId, page, query, inStockOnly, activeOnly]
   );
 
+  async function pollImportJob(jobId: string) {
+    for (let i = 0; i < 90; i++) {
+      const status = await fetchImportJobStatus(token, shopId, jobId);
+      setActiveJob(status);
+      if (status.status === "completed" || status.status === "failed") {
+        setResult({
+          created: status.created,
+          updated: status.updated,
+          failed: status.failed,
+          errors: status.errors,
+        });
+        reload();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+
   async function upload(file: File | undefined) {
     if (!file) return;
     setImporting(true);
     setImportError(null);
     setResult(null);
+    setActiveJob(null);
     try {
-      setResult(await importProductFile(token, shopId, file));
-      reload();
+      const started = await startAsyncProductImport(token, shopId, {
+        platform: importPlatform === "shopify_url" ? "auto" : importPlatform,
+        file,
+      });
+      await pollImportJob(started.job_id);
+    } catch (err) {
+      setImportError(errorText(err));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function importFromShopifyUrl(e: FormEvent) {
+    e.preventDefault();
+    if (!shopifyImportUrl.trim()) return;
+    setImporting(true);
+    setImportError(null);
+    setResult(null);
+    setActiveJob(null);
+    try {
+      const started = await startAsyncProductImport(token, shopId, {
+        platform: "shopify_url",
+        shopifyUrl: shopifyImportUrl.trim(),
+      });
+      setShopifyImportUrl("");
+      await pollImportJob(started.job_id);
     } catch (err) {
       setImportError(errorText(err));
     } finally {
@@ -805,27 +854,77 @@ function Products({ token, shopId, logout }: TabProps) {
             <span className="material-symbols-outlined text-[16px]">add</span>
             Thêm sản phẩm
           </button>
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-on-primary shadow-xs transition hover:bg-primary-container">
-            <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            {importing ? "Đang import…" : "Import CSV / Excel"}
-            <input
-              type="file"
-              accept=".csv,.xlsx"
-              className="hidden"
-              disabled={importing}
-              onChange={(e) => {
-                upload(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-          </label>
+          <select
+            aria-label="Nguồn file import"
+            value={importPlatform}
+            onChange={(e) => setImportPlatform(e.target.value as typeof importPlatform)}
+            disabled={importing}
+            className="rounded-xl border border-outline-variant bg-surface px-3 py-2 text-xs font-semibold text-on-surface"
+          >
+            <option value="auto">Tự nhận diện (Shopee / Shopify / Chuẩn)</option>
+            <option value="shopee">Shopee Seller Center (.xlsx / .csv)</option>
+            <option value="shopify">Shopify Products (.csv)</option>
+            <option value="shopify_url">Nhập từ Link Shopify Store</option>
+            <option value="smartsales">Mẫu chuẩn SmartSales</option>
+          </select>
+          {importPlatform !== "shopify_url" && (
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-on-primary shadow-xs transition hover:bg-primary-container">
+              <span className="material-symbols-outlined text-[16px]">upload_file</span>
+              {importing ? "Đang xử lý…" : "Import File"}
+              <input
+                type="file"
+                accept=".csv,.xlsx"
+                className="hidden"
+                disabled={importing}
+                onChange={(e) => {
+                  upload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
         </div>
       }
     >
+      {importPlatform === "shopify_url" && (
+        <form onSubmit={importFromShopifyUrl} className="mb-4 flex gap-2">
+          <input
+            type="url"
+            required
+            value={shopifyImportUrl}
+            onChange={(e) => setShopifyImportUrl(e.target.value)}
+            disabled={importing}
+            placeholder="Nhập link Shopify (VD: https://ten-shop.myshopify.com)"
+            className="flex-1 rounded-xl border border-outline-variant bg-surface px-3.5 py-2 text-xs focus:border-primary focus:outline-none"
+          />
+          <button
+            disabled={importing || !shopifyImportUrl.trim()}
+            className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-on-primary disabled:opacity-50"
+          >
+            {importing ? "Đang đồng bộ…" : "Đồng bộ từ Shopify"}
+          </button>
+        </form>
+      )}
+      {activeJob && (activeJob.status === "queued" || activeJob.status === "running") && (
+        <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-950">
+          <div className="flex items-center justify-between font-semibold">
+            <span>
+              Đang đồng bộ danh mục ({activeJob.platform.toUpperCase()}) · Job #{activeJob.job_id.slice(0, 8)}
+            </span>
+            <span>{activeJob.progress_percent}%</span>
+          </div>
+          <p className="mt-1 text-sky-800">
+            Đã xử lý {activeJob.processed_products}/{activeJob.total_products} SP · Vector mới:{" "}
+            {activeJob.embedded} · Giữ nguyên vector: {activeJob.embedding_skipped}
+          </p>
+        </div>
+      )}
       {result && (
         <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-sm">
           <p className="font-semibold text-emerald-900">
-            Import hoàn tất: Tạo mới {result.created} · Cập nhật {result.updated} · Lỗi {result.failed}
+            Import hoàn tất: Tạo mới {result.created} · Cập nhật {result.updated}
+            {activeJob ? ` · Tạo Vector AI ${activeJob.embedded} (Bỏ qua ${activeJob.embedding_skipped})` : ""} · Lỗi{" "}
+            {result.failed}
           </p>
           {result.errors.slice(0, 5).map((e) => (
             <p key={`${e.row_number}-${e.reason}`} className="mt-1 text-xs text-red-700">
@@ -1014,6 +1113,7 @@ function Products({ token, shopId, logout }: TabProps) {
 
 function Conversations({ token, shopId, logout }: TabProps) {
   const [selected, setSelected] = useState<ConversationSummary | null>(null);
+  const [togglingMode, setTogglingMode] = useState(false);
   const list = useLoad<Page<ConversationSummary>>(() => fetchConversations(token, shopId), logout, [token, shopId]);
   const thread = useLoad<ConversationMessage[]>(
     () => (selected ? fetchMessages(token, shopId, selected.id) : Promise.resolve([])),
@@ -1021,6 +1121,22 @@ function Conversations({ token, shopId, logout }: TabProps) {
     [token, shopId, selected?.id]
   );
   const messages = thread.loading ? null : thread.data;
+
+  async function toggleBotMode(conv: ConversationSummary) {
+    const nextMode = conv.status === "HUMAN_TAKEOVER" ? "BOT_ACTIVE" : "HUMAN_TAKEOVER";
+    setTogglingMode(true);
+    try {
+      const updated = await setConversationBotMode(token, shopId, conv.id, nextMode);
+      setSelected({
+        ...conv,
+        status: updated.status,
+        human_takeover_until: updated.human_takeover_until,
+      });
+      list.reload();
+    } finally {
+      setTogglingMode(false);
+    }
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
@@ -1059,6 +1175,11 @@ function Conversations({ token, shopId, logout }: TabProps) {
                       ✓ Đã để lại SĐT
                     </span>
                   )}
+                  {c.status === "HUMAN_TAKEOVER" && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-bold text-amber-900">
+                      ⏸ Đang chờ chủ shop
+                    </span>
+                  )}
                 </div>
               </button>
             </li>
@@ -1069,6 +1190,24 @@ function Conversations({ token, shopId, logout }: TabProps) {
       <Card
         title={selected ? `Chi tiết hội thoại · ${selected.customer_id}` : "Nội dung cuộc trò chuyện"}
         subtitle={selected ? `Bắt đầu lúc ${when(selected.created_at)}` : "Chọn một hội thoại bên trái để xem"}
+        action={
+          selected && (
+            <button
+              type="button"
+              disabled={togglingMode}
+              onClick={() => void toggleBotMode(selected)}
+              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:opacity-50 ${
+                selected.status === "HUMAN_TAKEOVER"
+                  ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                  : "border border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              }`}
+            >
+              {selected.status === "HUMAN_TAKEOVER"
+                ? "▶ Bật lại Bot AI"
+                : "👩‍💼 Tạm dừng Bot (Nhận chat)"}
+            </button>
+          )
+        }
       >
         {!selected && (
           <div className="py-12 text-center text-sm text-on-surface-variant">

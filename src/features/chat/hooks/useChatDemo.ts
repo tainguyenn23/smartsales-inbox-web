@@ -18,6 +18,8 @@ export interface ChatMessage {
   content: string;
   /** Danh sách sản phẩm từ SSE `products` event — contract stream, không phải ProductCard JSON */
   products?: StreamProductItem[];
+  /** Các câu hỏi gợi mở bấm nhanh từ SSE `suggestions` event */
+  suggestions?: string[];
   createdAt: Date;
   /** true khi đang nhận tokens (chỉ có ý nghĩa với message role=assistant) */
   isStreaming?: boolean;
@@ -27,6 +29,17 @@ export interface ChatMessage {
   status?: string;
   /** Backend yêu cầu hiện form tên/SĐT (SSE `action` lead_form) */
   leadForm?: boolean;
+  /** Điều hướng gian hàng khi có > 20 kết quả (SSE `action` open_store) */
+  openStore?: {
+    totalMatches: number;
+    links: { shopee_url?: string; shopify_url?: string; catalog_url?: string };
+  };
+  /** Chuyển giao chủ shop / nhân viên (SSE `action` human_handoff) */
+  humanHandoff?: {
+    locked: boolean;
+    zaloUrl?: string | null;
+    hotline?: string | null;
+  };
 }
 
 export function useChatDemo(shopSlug: string) {
@@ -218,11 +231,63 @@ export function useChatDemo(shopSlug: string) {
               );
             },
 
-            // --- action: hiện form để lại tên/SĐT dưới tin nhắn này ---
+            // --- reset/replace: xóa bỏ đoạn stream bị đứt giữa chừng ---
+            onReset: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (!msgId) return;
+              const nextContent = typeof event.content === "string" ? event.content : "";
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId ? { ...m, content: nextContent } : m
+                )
+              );
+            },
+
+            // --- action: lead_form | open_store | human_handoff ---
             onAction: (event) => {
               const msgId = streamingMsgIdRef.current;
-              if (!msgId || event.type !== "lead_form") return;
-              setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, leadForm: true } : m)));
+              if (!msgId) return;
+              if (event.type === "lead_form") {
+                setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, leadForm: true } : m)));
+              } else if (event.type === "open_store") {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === msgId
+                      ? {
+                          ...m,
+                          openStore: {
+                            totalMatches: event.total_matches ?? 20,
+                            links: event.store_links ?? {},
+                          },
+                        }
+                      : m
+                  )
+                );
+              } else if (event.type === "human_handoff") {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === msgId
+                      ? {
+                          ...m,
+                          humanHandoff: {
+                            locked: Boolean(event.locked),
+                            zaloUrl: event.zalo_url,
+                            hotline: event.hotline,
+                          },
+                        }
+                      : m
+                  )
+                );
+              }
+            },
+
+            // --- suggestions: gợi ý câu hỏi tiếp nối bấm 1 chạm ---
+            onSuggestions: (event) => {
+              const msgId = streamingMsgIdRef.current;
+              if (!msgId || !Array.isArray(event.suggestions)) return;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === msgId ? { ...m, suggestions: event.suggestions } : m))
+              );
             },
 
             // --- error SSE event: hiển thị warning, tiếp tục đọc đến done ---
